@@ -1,0 +1,10 @@
+# Always LF line endings in the repo and in working copies, also on Windows, so Prettier, Ruff
+# and shell scripts in Docker behave the same on every machine.
+* text=auto eol=lf
+
+# Binary files: never convert.
+*.ico binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.epub binary

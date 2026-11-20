@@ -84,6 +84,15 @@ npm run lint && npm run format:check && npm run typecheck && npm run build
 Automated tests never call paid APIs (Claude, Voyage); they use fakes. `BOOKCRUNCH_PARSER=fake`
 selects the fake parser until the real one is merged.
 
+Database tests (`tests/db`) run only when `TEST_DATABASE_URL` is set; they drop and recreate the
+schema, so point it at a separate database, never the development one:
+
+```bash
+docker compose exec postgres createdb -U bookcrunch bookcrunch_test
+export TEST_DATABASE_URL=postgresql+asyncpg://bookcrunch:bookcrunch@localhost:5432/bookcrunch_test
+pytest
+```
+
 ## Deployment
 
 One Linux VM with Docker. On the host: `git pull`, set `SITE_ADDRESS` to the domain in `.env`
@@ -100,7 +109,21 @@ One Linux VM with Docker. On the host: `git pull`, set `SITE_ADDRESS` to the dom
 - **`next.config.ts` rewrites `/api` to `localhost:8000`.** Only used by `npm run dev`; in Docker
   Caddy sends `/api` to the backend before Next.js sees it.
 - **Shared contract files are excluded from Ruff** until both developers agree to reformat them.
+- **Data model in one module** (`backend/app/db/models.py`), one class per table of specification
+  section 6.2. Allowed values (statuses, lengths, languages) are Python `StrEnum`s and VARCHAR
+  columns with CHECK constraints, not PostgreSQL ENUM types, so adding a value does not need
+  `ALTER TYPE`. Chapter kind and file format reuse the enums of the parser contract.
+- **Everything derived from a book is deleted with it** by `ON DELETE CASCADE`, including the links
+  between derived rows (chapter summaries, key ideas, citations). `llm_usage.job_id` is
+  `SET NULL`, so cost records outlive jobs.
+- **Links can never cross books.** Chunks, chapter summaries, key ideas and citations store
+  `book_id` and point to their chapter, summary, question or chunk with a composite foreign key
+  such as `(chapter_id, book_id) → chapters (id, book_id)` (`same_book()` in `models.py`). A bug
+  that mixes IDs fails loudly instead of showing a passage of another user's book. Emails have a
+  lower-case CHECK. See specification 1.2, Appendix D.
+- **Migrations are checked in CI.** `tests/db` applies all migrations to an empty database, runs
+  `alembic check` (fails if a model changed without a migration) and checks the constraints.
 
 ## Known limitations
 
-Written as features land. The skeleton has no data model, authentication or upload yet.
+Written as features land. No authentication or upload yet.

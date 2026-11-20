@@ -7,11 +7,9 @@ from alembic import context
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
+import app.db.models  # noqa: F401  (registers the tables on Base.metadata for autogenerate)
 from app.core.config import get_settings
 from app.db.base import Base
-
-# Import model modules here once they exist, so autogenerate can see their tables, e.g.:
-# import app.db.models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
@@ -20,10 +18,15 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def database_url() -> str:
+    """DATABASE_URL from the settings, unless the caller set sqlalchemy.url (the tests do)."""
+    return config.get_main_option("sqlalchemy.url") or get_settings().database_url
+
+
 def run_migrations_offline() -> None:
     """Generate SQL without a database connection (alembic upgrade head --sql)."""
     context.configure(
-        url=get_settings().database_url,
+        url=database_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -39,7 +42,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_migrations_online() -> None:
-    engine = create_async_engine(get_settings().database_url)
+    engine = create_async_engine(database_url())
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await engine.dispose()

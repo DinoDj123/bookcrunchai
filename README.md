@@ -93,6 +93,19 @@ export TEST_DATABASE_URL=postgresql+asyncpg://bookcrunch:bookcrunch@localhost:54
 pytest
 ```
 
+## Background jobs
+
+The API saves a row in `jobs` and puts only its ID on the Redis queue (`app/worker/queue.py`); the
+worker (`app/worker/tasks.py`) reads the job and the book from PostgreSQL, runs the parser and
+writes status, chapters and errors back. PostgreSQL is the only place where job status lives.
+
+- A file the parser rejects (damaged, protected, scanned, not a book) fails the job at once with
+  the parser's error code; the book is marked `failed` too.
+- Other errors (database, network) are retried by ARQ, 3 attempts in total, then the job and the
+  book are marked `failed` with `INTERNAL_ERROR`.
+- With `BOOKCRUNCH_PARSER=fake`, set `FAKE_PARSER_DELAY=3` or `FAKE_PARSER_ERROR=NO_TEXT_LAYER` on
+  the worker to see a slow or a failing job (`docs/contracts/parse_book.md`, section 6).
+
 ## Deployment
 
 One Linux VM with Docker. On the host: `git pull`, set `SITE_ADDRESS` to the domain in `.env`

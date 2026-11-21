@@ -113,7 +113,7 @@ curl -b jar -F 'file=@book.epub' http://localhost/api/v1/books      # note the j
 curl -b jar http://localhost/api/v1/jobs/<job id>
 ```
 
-Uploaded files are stored in `STORAGE_DIR` as `<book id>.epub` or `<book id>.pdf`; the name the user gave is used only for the first title. If Redis cannot be reached the upload is refused with 503 and nothing is kept.
+Uploaded files are stored in `STORAGE_DIR` as `<book id>.epub` or `<book id>.pdf`; the name the user gave is used only for the first title. If Redis cannot be reached the upload is refused with 503 and the book is removed again. Uploading a file whose job is still `queued` hands that job to the queue again, which rescues a job that was saved but never enqueued. The session and the declared size are checked before the request body is read; files over 51 MB are already refused by Caddy, with its own (non-JSON) 413.
 
 ## Background jobs
 
@@ -134,7 +134,7 @@ writes status, chapters and errors back. PostgreSQL is the only place where job 
 
 ## Deployment
 
-One Linux VM with Docker. On the host: `git pull`, set `SITE_ADDRESS` to the domain in `.env`
+One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`, a random `JWT_SECRET` (the API, the worker and the migrations refuse to start with the example value once `SITE_ADDRESS` is a domain) and `SITE_ADDRESS` to the domain in `.env`
 (Caddy then gets an HTTPS certificate), `docker compose up --build -d`,
 `docker compose run --rm api alembic upgrade head`.
 

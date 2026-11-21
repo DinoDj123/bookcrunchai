@@ -1106,7 +1106,7 @@ Details of the main endpoints:
 
 2.  Login: POST /auth/login verifies the password and issues a JWT signed with HS256 that contains the user ID and an expiry time 24 hours ahead.
 
-3.  The token is returned in an httpOnly, Secure, SameSite=Lax cookie named session, so page scripts cannot read it. Only in local development, which runs on plain HTTP, the cookie is set without Secure. Outside local development the API does not start with a default or short JWT secret.
+3.  The token is returned in an httpOnly, Secure, SameSite=Lax cookie named session, so page scripts cannot read it. Only in local development, which runs on plain HTTP, the cookie is set without Secure. Outside local development (ENVIRONMENT other than local, or a site address with a domain name) the API does not start with a default or short JWT secret.
 
 4.  Every protected endpoint uses one FastAPI dependency that reads the cookie, verifies signature and expiry, and loads the user. A missing or invalid token gives 401.
 

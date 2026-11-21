@@ -55,7 +55,8 @@ registration and login are built first.
   `QUEUE_UNAVAILABLE`, so the user can simply upload again.
 - Job status: the job joined to its book; 404 `JOB_NOT_FOUND` unless the user owns the book or
   it is a demo book.
-- Settings refuse to start in production with the default or a short `JWT_SECRET`.
+- Settings refuse to start with the default or a short `JWT_SECRET` unless the application is local (`ENVIRONMENT=local` and no domain in `SITE_ADDRESS`).
+- After review: the handler reads the form itself, after the session and the declared size are checked, because FastAPI would otherwise receive the whole body first. A repeated upload whose job is still `queued` enqueues that job again.
 
 ## Left to the builder
 

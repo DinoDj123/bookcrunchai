@@ -194,3 +194,36 @@ async def test_two_users_have_separate_sessions(client: AsyncClient) -> None:
 
     assert first != second
     assert (await client.get(ME)).json()["email"] == "second@example.com"
+
+
+async def test_cookie_is_secure_when_the_site_has_a_domain(
+    client: AsyncClient, settings: Settings
+) -> None:
+    settings.site_address = "bookcrunch.example.com"
+
+    response = await client.post(REGISTER, json={"email": EMAIL, "password": PASSWORD})
+
+    assert "Secure" in response.headers["set-cookie"]
+
+
+async def test_spaces_are_part_of_a_password(client: AsyncClient) -> None:
+    await client.post(REGISTER, json={"email": EMAIL, "password": "  spaced out  "})
+    client.cookies.clear()
+
+    trimmed = await client.post(LOGIN, json={"email": EMAIL, "password": "spaced out"})
+    exact = await client.post(LOGIN, json={"email": EMAIL, "password": "  spaced out  "})
+
+    assert trimmed.status_code == 401
+    assert exact.status_code == 200
+
+
+async def test_password_of_only_spaces_is_long_enough_if_it_has_8(client: AsyncClient) -> None:
+    response = await client.post(REGISTER, json={"email": EMAIL, "password": " " * 8})
+
+    assert response.status_code == 201
+
+
+async def test_login_refuses_an_oversized_password(client: AsyncClient, registered: str) -> None:
+    response = await client.post(LOGIN, json={"email": EMAIL, "password": "x" * 129})
+
+    assert response.status_code == 422

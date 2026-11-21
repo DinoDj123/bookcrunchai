@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import books
+from app.api.books import MULTIPART_OVERHEAD_BYTES
 from app.core.config import Settings
 from app.db.models import Book, Job
 from tests.api.conftest import UPLOAD_LIMIT, FakeQueue, register
@@ -90,7 +91,9 @@ async def test_same_file_again_returns_the_existing_book(
     assert await count(session, Book) == 1
     assert await count(session, Job) == 1
     assert len(stored_files(settings)) == 1
-    assert len(queue.calls) == 1
+    # The job is still waiting, so it is handed to the queue again; the queue ignores a job
+    # it already has. This rescues a job whose first enqueue never happened.
+    assert queue.calls == [queue.calls[0]] * 2
 
 
 async def test_same_file_from_another_user_is_a_separate_book(
@@ -135,7 +138,7 @@ async def test_upload_that_lost_a_race_returns_the_winner(
     assert second.json() == first.json()
     assert await count(session, Book) == 1
     assert len(stored_files(settings)) == 1
-    assert len(queue.calls) == 1
+    assert queue.calls == [queue.calls[0]] * 2
 
 
 async def test_largest_allowed_file_is_accepted(client: AsyncClient, registered: str) -> None:
@@ -249,3 +252,53 @@ async def test_queue_failure_leaves_nothing_behind(
     # The user can simply try again once the queue is back.
     queue.fail = False
     assert (await upload(client, "book.epub", EPUB)).status_code == 202
+
+
+async def test_repeated_upload_does_not_queue_a_finished_job_again(
+    client: AsyncClient, registered: str, session: AsyncSession, queue: FakeQueue
+) -> None:
+    first = await upload(client, "book.epub", EPUB)
+    job = await session.get_one(Job, uuid.UUID(first.json()["job"]["id"]))
+    job.status = "done"
+    await session.flush()
+
+    second = await upload(client, "book.epub", EPUB)
+
+    assert second.status_code == 200
+    assert second.json()["job"] == {"id": str(job.id), "status": "done"}
+    assert len(queue.calls) == 1
+
+
+async def test_repeated_upload_while_the_queue_is_down_keeps_the_book(
+    client: AsyncClient, registered: str, session: AsyncSession, queue: FakeQueue
+) -> None:
+    await upload(client, "book.epub", EPUB)
+    queue.fail = True
+
+    response = await upload(client, "book.epub", EPUB)
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "QUEUE_UNAVAILABLE"
+    assert await count(session, Book) == 1
+    assert await count(session, Job) == 1
+
+
+async def test_request_declared_far_over_the_limit_is_refused(
+    client: AsyncClient, registered: str, settings: Settings
+) -> None:
+    content = EPUB + b"x" * (UPLOAD_LIMIT + MULTIPART_OVERHEAD_BYTES)
+
+    response = await upload(client, "book.epub", content)
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "FILE_TOO_LARGE"
+    assert stored_files(settings) == []
+
+
+async def test_file_name_with_spaces_around_it_is_accepted(
+    client: AsyncClient, registered: str
+) -> None:
+    response = await upload(client, " book.epub ", EPUB)
+
+    assert response.status_code == 202
+    assert response.json()["book"]["title"] == "book"

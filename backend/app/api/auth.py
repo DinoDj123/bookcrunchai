@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Response
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -23,12 +23,20 @@ from app.db.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+PASSWORD_MIN_LENGTH = 8
+# The upper limit keeps a huge "password" from tying up the server in the hash function.
+PASSWORD_MAX_LENGTH = 128
+
 
 class Credentials(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-
     email: EmailStr
-    password: str
+    # Taken exactly as typed: spaces are part of a password.
+    password: Annotated[str, Field(max_length=PASSWORD_MAX_LENGTH)]
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def without_spaces_around(cls, email: object) -> object:
+        return email.strip() if isinstance(email, str) else email
 
     @field_validator("email")
     @classmethod
@@ -38,8 +46,7 @@ class Credentials(BaseModel):
 
 
 class NewAccount(Credentials):
-    # The upper limit keeps a huge "password" from tying up the server in the hash function.
-    password: Annotated[str, Field(min_length=8, max_length=128)]
+    password: Annotated[str, Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)]
 
 
 class UserOut(BaseModel):
@@ -55,7 +62,7 @@ def start_session(response: Response, user: User, settings: Settings) -> None:
         httponly=True,  # page scripts cannot read it
         samesite="lax",
         # Browsers send a Secure cookie only over HTTPS; local development runs on plain HTTP.
-        secure=settings.environment != "local",
+        secure=not settings.is_local,
     )
 
 
@@ -98,8 +105,11 @@ async def login(
 
 
 @router.post("/logout", status_code=204)
-async def logout(_user: CurrentUser, response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE)
+async def logout(_user: CurrentUser, response: Response, settings: SettingsDep) -> None:
+    # Same attributes as when the cookie was set.
+    response.delete_cookie(
+        SESSION_COOKIE, httponly=True, samesite="lax", secure=not settings.is_local
+    )
 
 
 @router.get("/me")

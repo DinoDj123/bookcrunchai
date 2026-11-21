@@ -13,6 +13,10 @@ dependencies = [
     "alembic>=1.14,<2",
     "pgvector>=0.3",
     "arq>=0.26",
+    "argon2-cffi>=23.1",  # password hashing (FR-001)
+    "pyjwt>=2.9,<3",  # session token (section 7.3)
+    "python-multipart>=0.0.12",  # file uploads in FastAPI (FR-002)
+    "email-validator>=2.2",  # EmailStr in request schemas
     # Parsing libraries (EbookLib, BeautifulSoup, PyMuPDF) are added by Track A with the real parser.
 ]
 

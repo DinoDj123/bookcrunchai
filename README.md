@@ -102,7 +102,11 @@ writes status, chapters and errors back. PostgreSQL is the only place where job 
 - A file the parser rejects (damaged, protected, scanned, not a book) fails the job at once with
   the parser's error code; the book is marked `failed` too.
 - Other errors (database, network) are retried by ARQ, 3 attempts in total, then the job and the
-  book are marked `failed` with `INTERNAL_ERROR`.
+  book are marked `failed` with `INTERNAL_ERROR`. An attempt that died with the worker (killed,
+  out of memory) counts too.
+- Every 5 minutes the worker fails jobs that are still `running` 12 minutes after they started
+  (`fail_stale_jobs`), so a book never stays in `processing`. After a worker is killed, its job
+  is started again only when ARQ's lock on it expires, about 10 minutes later.
 - With `BOOKCRUNCH_PARSER=fake`, set `FAKE_PARSER_DELAY=3` or `FAKE_PARSER_ERROR=NO_TEXT_LAYER` on
   the worker to see a slow or a failing job (`docs/contracts/parse_book.md`, section 6).
 

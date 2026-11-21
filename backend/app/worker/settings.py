@@ -7,11 +7,12 @@ generate_summary is added in a later task.
 
 from typing import Any
 
+from arq import cron
 from arq.connections import RedisSettings
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.worker.tasks import MAX_TRIES, process_book
+from app.worker.tasks import JOB_TIMEOUT_SECONDS, MAX_TRIES, fail_stale_jobs, process_book
 
 
 async def ping(_ctx: dict[str, Any]) -> str:
@@ -27,12 +28,17 @@ async def on_startup(ctx: dict[str, Any]) -> None:
 
 class WorkerSettings:
     functions = [process_book, ping]
+    cron_jobs = [cron(fail_stale_jobs, minute=set(range(0, 60, 5)), run_at_startup=True)]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     on_startup = on_startup
-    max_tries = MAX_TRIES
-    # Seconds. Above PARSE_TIMEOUT_SECONDS, so the task's own limit fires first and can mark the
-    # book failed.
-    job_timeout = 600
+    # One more than MAX_TRIES. ARQ also counts a try that died with the worker, and after its own
+    # last try it drops the job without calling the task; the extra try lets process_book mark the
+    # job failed instead.
+    max_tries = MAX_TRIES + 1
+    job_timeout = JOB_TIMEOUT_SECONDS
+    # Parsing is CPU work in a thread; a few at a time, so a burst of uploads does not push
+    # parses over their time limit.
+    max_jobs = 2
     # Results live in PostgreSQL. A result kept in Redis would also stop the same job ID from
     # being queued again, which a retry of a failed job needs.
     keep_result = 0

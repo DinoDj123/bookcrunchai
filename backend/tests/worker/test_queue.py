@@ -9,7 +9,7 @@ from arq.worker import func
 from app.db.models import Job, JobType
 from app.worker.queue import enqueue_job
 from app.worker.settings import WorkerSettings
-from app.worker.tasks import process_book
+from app.worker.tasks import JOB_TIMEOUT_SECONDS, process_book
 
 pytestmark = pytest.mark.anyio
 
@@ -45,7 +45,9 @@ async def test_enqueue_returns_false_when_already_queued() -> None:
 
 def test_worker_registers_process_book() -> None:
     assert process_book in WorkerSettings.functions
-    assert WorkerSettings.max_tries == 3
+    # One more than MAX_TRIES: the extra try only marks the job failed (see process_book).
+    assert WorkerSettings.max_tries == 4
+    assert WorkerSettings.job_timeout == JOB_TIMEOUT_SECONDS
     assert WorkerSettings.keep_result == 0
     # enqueue_job() uses the job type as the task name, so the two must be the same string.
     assert func(process_book).name == JobType.PROCESS_BOOK.value

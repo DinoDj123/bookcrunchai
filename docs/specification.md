@@ -1,8 +1,8 @@
-# bookcrunch.ai — Software Specification v1.2 (Markdown copy)
+# bookcrunch.ai — Software Specification v1.4 (Markdown copy)
 
 Team Bookcrunch.ai · Daris Velović, Dino Đerekerac · Mentors: Ana Pješivac, Tamara Pavlović · 21.11.2026
 
-> This is a text copy of `bookcrunch_software_specification_v1.2.docx` so that Claude Code can read it.
+> This is a text copy of `bookcrunch_software_specification_v1.4.docx` so that Claude Code can read it.
 > The Word document is the official version sent to the mentors; diagrams and wireframes are only there.
 > When the Word document changes, regenerate this file.
 
@@ -750,7 +750,7 @@ An uploaded book or a demo book.
 | source_language   | VARCHAR(8)   | NULL                           | Detected language of the book              |
 | file_format       | VARCHAR(4)   | NOT NULL, epub \| pdf          | Format of the uploaded file                |
 | file_sha256       | CHAR(64)     | NOT NULL, UNIQUE with owner_id | Hash of the file, used for de-duplication  |
-| file_path         | VARCHAR(500) | NOT NULL                       | Location of the stored file                |
+| file_path         | VARCHAR(500) | NOT NULL                       | Generated name of the stored file, relative to the storage directory |
 | file_size_bytes   | BIGINT       | NOT NULL, \> 0                 | File size                                  |
 | status            | VARCHAR(12)  | NOT NULL                       | uploaded \| processing \| ready \| failed  |
 | error_code        | VARCHAR(40)  | NULL                           | Reason when status is failed               |
@@ -923,7 +923,7 @@ One record per external API call; the basis for cost reporting.
 
 - Long operations return 202 Accepted with a job that the client polls; cached results return 200 immediately.
 
-- Standard status codes: 200, 201, 202, 204, 400, 401, 404, 409, 413, 415, 422, 429, 500.
+- Standard status codes: 200, 201, 202, 204, 400, 401, 404, 409, 413, 415, 422, 429, 500, 503.
 
 - One error format for all endpoints: { "error": { "code": "BOOK_NOT_FOUND", "message": "…", "details": { } } }. Codes are stable strings the frontend can rely on.
 
@@ -1012,7 +1012,7 @@ Details of the main endpoints:
 </tr>
 <tr class="even">
 <td><strong>Error Responses</strong></td>
-<td>401 UNAUTHENTICATED, 413 FILE_TOO_LARGE, 415 UNSUPPORTED_FILE_TYPE, 422 VALIDATION_ERROR</td>
+<td>401 UNAUTHENTICATED, 413 FILE_TOO_LARGE, 415 UNSUPPORTED_FILE_TYPE, 422 VALIDATION_ERROR, 503 QUEUE_UNAVAILABLE (the job queue cannot be reached; nothing is stored)</td>
 </tr>
 </tbody>
 </table>
@@ -1102,11 +1102,11 @@ Details of the main endpoints:
 
 **Status: proposed, to be confirmed with the mentor (Appendix E).**
 
-1.  Registration: POST /auth/register validates the input, stores the user with an Argon2id password hash and logs the user in.
+1.  Registration: POST /auth/register validates the input (email, password of 8 to 128 characters), stores the user with an Argon2id password hash and logs the user in: 201 Created with { id, email } and the session cookie; 409 EMAIL_TAKEN if the email is already registered.
 
 2.  Login: POST /auth/login verifies the password and issues a JWT signed with HS256 that contains the user ID and an expiry time 24 hours ahead.
 
-3.  The token is returned in an httpOnly, Secure, SameSite=Lax cookie, so page scripts cannot read it.
+3.  The token is returned in an httpOnly, Secure, SameSite=Lax cookie named session, so page scripts cannot read it. Only in local development, which runs on plain HTTP, the cookie is set without Secure. Outside local development (ENVIRONMENT other than local, or a site address with a domain name) the API does not start with a default or short JWT secret.
 
 4.  Every protected endpoint uses one FastAPI dependency that reads the cookie, verifies signature and expiry, and loads the user. A missing or invalid token gives 401.
 
@@ -1296,6 +1296,8 @@ Both members are full-stack developers. Work is split into two tracks that touch
 | 1.0         | 20.11.2026 | Daris Velović, Dino Đerekerac | Initial version, submitted for mentor approval |
 | 1.1         | 20.11.2026 | Daris Velović                 | Data model implemented: ON DELETE rules for chapter_summaries, key_ideas, citations and llm_usage.job_id; composite foreign key from chunks to chapters; decision on enumerated values (Appendix D) |
 | 1.2 | 21.11.2026 | Daris Velović | Same-book rules enforced by the database: book_id and composite foreign keys on chapter_summaries, key_ideas and citations; CHECK that emails are stored in lower case; new rule that a citation references a chunk of the question’s book (6.3) |
+| 1.3 | 21.11.2026 | Daris Velović | Job queue implemented: parser failures fail a job at once, other errors are retried up to 3 attempts (Appendix C); decisions on job retries and job results (Appendix D) |
+| 1.4 | 21.11.2026 | Daris Velović | Authentication, upload and job status implemented: register response and EMAIL_TAKEN, cookie name and Secure rule (7.3); 503 QUEUE_UNAVAILABLE on upload (7.1, 7.2); books.file_path is relative to the storage directory (6.2); decisions on upload without a queue and on the login answer (Appendix D) |
 
 # Appendices
 
@@ -1349,7 +1351,7 @@ Book status and job status:
 | **Object**       | **States and transitions**                                                                                    |
 |------------------|---------------------------------------------------------------------------------------------------------------|
 | Book             | uploaded → processing → ready. From processing the book can go to failed; retry moves it back to processing.  |
-| Process-book job | queued → running (stages: parsing → chunking → embedding → chapter notes) → done, or failed after 3 attempts. |
+| Process-book job | queued → running (stages: parsing → chunking → embedding → chapter notes) → done, or failed: at once when the parser rejects the file, after 3 attempts on other errors. |
 | Summary          | queued → running → ready, or failed. A ready summary is permanent (cache).                                    |
 
 Sequence for a question (FR-011):
@@ -1388,6 +1390,10 @@ Significant decisions and the alternatives that were rejected.
 | Deployment         | Docker Compose on one host                                                | Split hosting (frontend on a platform, backend elsewhere): two deployments and cross-origin cookies.                                                                      |
 | Enumerated values  | VARCHAR columns with CHECK constraints; allowed values in Python enums    | PostgreSQL ENUM types: adding a value needs ALTER TYPE in a migration. No database check at all: invalid values would only be caught by the application.                 |
 | Same-book links | book_id plus composite foreign keys, for example (chapter_id, book_id) → chapters (id, book_id) | Check in the application only: a bug could link a citation or key idea to another user’s book and show its text (privacy, FR-015). Database trigger: harder to read and test than a foreign key. |
+| Job retries | Parser failures (unsupported, damaged, protected or scanned file, parser bug, parser running over 5 minutes) fail the job at once; other errors (database, network) are retried by ARQ, 3 attempts in total. A scheduled task fails jobs left “running” by a worker that died, so a book never stays in “processing” (4.5) | Retrying every failure 3 times: the same file fails the same way, so the user would only wait longer for the same message. Own retry loop in the task: repeats what ARQ does and does not survive a worker restart. |
+| Job results | Kept only in PostgreSQL; ARQ stores no result in Redis (keep_result = 0) and the ARQ job ID is the job’s UUID | Keeping ARQ results: a second copy of the status, and a kept result blocks queuing the same job ID again, which retrying a failed job needs. |
+| Upload when the queue is down | The book, its job and the stored file are removed and the API answers 503 QUEUE_UNAVAILABLE; the user uploads again | Keeping the book with a job nobody will run: it would stay “uploaded” forever, and uploading the file again would only return that stuck book (FR-014). Enqueuing before the database commit: the worker could look for a job that is not saved yet. |
+| Login answer | The same 401 INVALID_CREDENTIALS for an unknown email and a wrong password, and a password hash is checked in both cases | Separate messages or a faster answer for unknown emails: would reveal which addresses have an account. |
 
 ## E. Open Questions for the Mentor
 

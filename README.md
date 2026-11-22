@@ -93,6 +93,28 @@ export TEST_DATABASE_URL=postgresql+asyncpg://bookcrunch:bookcrunch@localhost:54
 pytest
 ```
 
+## API so far
+
+All under `/api/v1`; the full reference is the OpenAPI page at `/api/v1/docs`.
+
+| Endpoint | What |
+|---|---|
+| `POST /auth/register`, `POST /auth/login` | Create an account or log in; both set the `session` cookie (JWT, 24 hours, httpOnly) |
+| `POST /auth/logout`, `GET /auth/me` | End the session; current user |
+| `POST /books` | Upload an EPUB or PDF (multipart field `file`, at most 50 MB): 202 with the book and its job, or 200 with the existing book if this user already uploaded the same file |
+| `GET /jobs/{id}` | Status, stage and progress of a job; poll it while the job runs |
+
+Try it with curl (the cookie is kept in `jar`):
+
+```bash
+curl -c jar -H 'Content-Type: application/json' \
+  -d '{"email":"me@example.com","password":"correct horse"}' http://localhost/api/v1/auth/register
+curl -b jar -F 'file=@book.epub' http://localhost/api/v1/books      # note the job id
+curl -b jar http://localhost/api/v1/jobs/<job id>
+```
+
+Uploaded files are stored in `STORAGE_DIR` as `<book id>.epub` or `<book id>.pdf`; the name the user gave is used only for the first title. If Redis cannot be reached the upload is refused with 503 and the book is removed again. Uploading a file whose job is still `queued` hands that job to the queue again, which rescues a job that was saved but never enqueued. The session and the declared size are checked before the request body is read; files over 51 MB are already refused by Caddy, with its own (non-JSON) 413.
+
 ## Background jobs
 
 The API saves a row in `jobs` and puts only its ID on the Redis queue (`app/worker/queue.py`); the
@@ -112,7 +134,7 @@ writes status, chapters and errors back. PostgreSQL is the only place where job 
 
 ## Deployment
 
-One Linux VM with Docker. On the host: `git pull`, set `SITE_ADDRESS` to the domain in `.env`
+One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`, a random `JWT_SECRET` (the API, the worker and the migrations refuse to start with the example value once `SITE_ADDRESS` is a domain) and `SITE_ADDRESS` to the domain in `.env`
 (Caddy then gets an HTTPS certificate), `docker compose up --build -d`,
 `docker compose run --rm api alembic upgrade head`.
 

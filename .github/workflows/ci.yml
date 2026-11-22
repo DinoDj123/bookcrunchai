@@ -13,6 +13,22 @@ jobs:
         working-directory: backend
     env:
       BOOKCRUNCH_PARSER: fake
+      # Throwaway database for tests/db (migrations and constraints); same image as docker-compose.
+      TEST_DATABASE_URL: postgresql+asyncpg://bookcrunch:bookcrunch@localhost:5432/bookcrunch_test
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: bookcrunch
+          POSTGRES_PASSWORD: bookcrunch
+          POSTGRES_DB: bookcrunch_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bookcrunch -d bookcrunch_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

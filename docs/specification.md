@@ -1,6 +1,6 @@
 # bookcrunch.ai — Software Specification v1.5 (Markdown copy)
 
-Team Bookcrunch.ai · Daris Velović, Dino Đerekerac · Mentors: Ana Pješivac, Tamara Pavlović · 21.11.2026
+Team Bookcrunch.ai · Daris Velović, Dino Đerekerac · Mentors: Ana Pješivac, Tamara Pavlović · 23.11.2026
 
 > This is a text copy of `bookcrunch_software_specification_v1.5.docx` so that Claude Code can read it.
 > The Word document is the official version sent to the mentors; diagrams and wireframes are only there.

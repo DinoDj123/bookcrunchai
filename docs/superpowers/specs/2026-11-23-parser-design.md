@@ -219,12 +219,37 @@ contract wording); afterwards it also sets `title_from_metadata=False` in that c
 
 | Book | Source | Expected (contract §7) | Measured |
 |---|---|---|---|
-| Pride and Prejudice | gutenberg.org/ebooks/1342, EPUB3 with images | 61 × `chapter` | not yet: Gutenberg was down on 23.11. — verify in A2 |
+| Pride and Prejudice | gutenberg.org/ebooks/1342, EPUB no images (see below) | 61 × `chapter` | NCX has exactly 61 chapter entries (A2); final count in A4 |
 | The Prince | planetebook.com/free-ebooks/the-prince.pdf | 26 × `chapter`, introduction + dedication `front_matter` | outline has exactly 26 chapters; dedication is NOT in the outline (needs keyword rule); 2 extra works after ch. XXVI (D2) |
-| Meditations | gutenberg.org/ebooks/2680, EPUB3 with images | 12 × `chapter`, introduction `front_matter`, notes `back_matter` | not yet — verify in A2 |
+| Meditations | gutenberg.org/ebooks/2680, EPUB3 with images | 12 × `chapter`, introduction `front_matter`, notes `back_matter` | nav has 12 book entries + INTRODUCTION, APPENDIX, NOTES, GLOSSARY (A2); "HIS FIRST BOOK" needs care in A4 |
 
 If a measured count differs from the contract table, the test uses the measured value only after
 a manual check, and contract §7 is updated with Daris (it is a shared file).
+
+### EPUB inspection (A2, 23.11.2026)
+
+gutenberg.org was down (503); both files come from the official mirror `gutenberg.pglaf.org`.
+P&P "EPUB3 with images" is 24.9 MB, so the no-images file (EPUB 2, 0.6 MB) is used (Dino).
+Details in `backend/tests/fixtures/books/SOURCES.md`.
+
+| | Pride and Prejudice (`pg1342.epub`) | Meditations (`pg2680-images-3.epub`) |
+|---|---|---|
+| OPF metadata | EPUB 2.0; `dc:title` "Pride and Prejudice"; `dc:creator` "Jane Austen" (no role); `dc:language` "en" | EPUB 3.0; `dc:title` "Meditations"; `dc:creator` "Emperor of Rome Marcus Aurelius" (role `aut` via `refines`); `dc:language` "en" |
+| Spine | 17 XHTML: cover wrapper (image only, no text), `pg-header` file (licence header + printed TOC + preface + Chapter I), 15 text files; the footer is at the end of the last file | 19 XHTML: cover wrapper, `pg-header` file (licence header, title, printed TOC), 16 text files, `pg-footer` file |
+| Navigation | NCX only, 63 entries, all level 1: book title, 61 chapters, licence | nav document (`toc.xhtml`) + NCX; 23 entries, levels 1–2 |
+| Gutenberg header/footer | `<div id="pg-header" class="pg-boilerplate">` and `<div id="pg-footer" class="pg-boilerplate">`; the `*** START/END ***` lines are inside them | `<header id="pg-header" class="pg-boilerplate">` and `<footer id="pg-footer" class="pg-boilerplate">`; markers inside |
+| Chapter headings | `<h2><a id="CHAPTER_II"/><span class="caption">I hope Mr. Bingley will like it.</span><br/><br/>CHAPTER II.</h2>`: illustration caption inside the heading (dropped by the reader); spelling varies: "Chapter I.", "CHAPTER XIII" (no dot), "CHAPTERXXVII." (no space) | `<h2>` "THE FIRST BOOK" … "THE TWELFTH BOOK", anchor ids `link2H_4_0001`…; level-3 sub-headings |
+| NCX/nav titles | contain the caption too: "He rode a black horse. CHAPTER III." → A4 should take the title from the heading block, not from the TOC label | clean |
+| Nav entries that look like chapters | **61** (`CHAPTER I`…`LXI`) ✔ matches contract | **12** ("THE FIRST BOOK"…"THE TWELFTH BOOK") ✔; plus "HIS FIRST BOOK" (heading before Book 1) with level-2 "concerning HIMSELF:", which A4 must not count as a chapter |
+| Other nav entries | "PRIDE. and PREJUDICE" (title page) | MEDITATIONS, "MARCUS AURELIUS ANTONINUS THE ROMAN EMPEROR", BOOKS (printed TOC), INTRODUCTION, APPENDIX, NOTES, GLOSSARY, "Paragraphs with First Lines" (level 2 under GLOSSARY) |
+| Licence nav entry | "THE FULL PROJECT GUTENBERG™ LICENSE": dropped (points into the removed footer) | same, dropped |
+| Text before chapter 1 | printed TOC, colophon, frontispiece caption, title page, dedication, PREFACE by George Saintsbury | title, printed TOC ("BOOKS"), INTRODUCTION |
+| Reader output | 2,249 blocks, 126,676 words, 0.5 s | 1,173 blocks, 77,440 words, 0.2 s |
+
+Reader notes found during inspection: Gutenberg XHTML uses self-closing `<a id="…"/>` and `<div/>`,
+which the HTML parser turns into open elements that swallow the rest of the document. The reader
+therefore parses well-formed XHTML with the XML parser and only falls back to the HTML parser for
+files that are not well-formed. Page-number spans (`x-ebookmaker-pageno`) contain no text.
 
 ## 8. Known limitations (go to README at integration)
 

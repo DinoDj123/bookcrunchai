@@ -27,7 +27,7 @@ from lxml import etree
 from .boilerplate import GUTENBERG_CLASS, GUTENBERG_IDS, is_gutenberg_end, is_gutenberg_start
 from .contract import FileFormat, ParseError, ParseErrorCode, normalize_text
 from .document import Block, RawDocument, TocEntry
-from .text import join_hyphenated
+from .text import join_hyphenated, strip_footnote_markers
 
 # Font obfuscation (IDPF and Adobe) only scrambles embedded fonts. It is not DRM, so an EPUB that
 # uses only these algorithms in META-INF/encryption.xml is read normally.
@@ -345,7 +345,7 @@ def _walk_nav_list(list_tag: Tag, level: int, nav_path: str, out: list[TocEntry]
     for li in list_tag.find_all("li", recursive=False):
         link = li.find(["a", "span"], recursive=False)
         if isinstance(link, Tag) and link.name == "a" and link.get("href"):
-            title = normalize_text(link.get_text(" "))
+            title = normalize_text(strip_footnote_markers(link.get_text(" ")))
             if title:
                 out.append(TocEntry(title, level, _resolve(nav_path, str(link["href"]))))
         sub = li.find(["ol", "ul"], recursive=False)
@@ -362,11 +362,15 @@ def _read_ncx(data: bytes, ncx_path: str) -> list[TocEntry]:
     return entries
 
 
+def _clean_label(raw: str) -> str:
+    return normalize_text(strip_footnote_markers(raw))
+
+
 def _walk_nav_points(parent: Tag, level: int, ncx_path: str, out: list[TocEntry]) -> None:
     for point in parent.find_all("navPoint", recursive=False):
         label = point.find("navLabel")
         content = point.find("content", recursive=False)
-        title = normalize_text(label.get_text(" ")) if isinstance(label, Tag) else ""
+        title = _clean_label(label.get_text(" ")) if isinstance(label, Tag) else ""
         src = content.get("src") if isinstance(content, Tag) else None
         if title and src:
             out.append(TocEntry(title, level, _resolve(ncx_path, str(src))))
@@ -402,7 +406,7 @@ class _BlockBuilder:
 
     def emit(self, raw_text: str, heading_level: int | None, ids: list[str]) -> None:
         self.add_ids(ids)
-        text = normalize_text(join_hyphenated(raw_text))
+        text = normalize_text(strip_footnote_markers(join_hyphenated(raw_text)))
         if not text:
             return  # anchors stay pending for the next block
         anchors = self._pending

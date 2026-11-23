@@ -417,6 +417,28 @@ def test_truncated_epub_is_corrupt_file(tmp_path: Path) -> None:
     assert info.value.code is ParseErrorCode.CORRUPT_FILE
 
 
+# --------------------------------------------------------------------------- footnote markers
+
+
+def test_inline_footnote_markers_are_removed_from_paragraphs_and_headings(tmp_path: Path) -> None:
+    path = make_epub(
+        tmp_path,
+        docs=[("a.xhtml", "<h2>Part[*] One</h2><p>Rome[*] fell, he said [12].</p>")],
+    )
+    doc = read_epub(path)
+    assert texts(doc) == ["Part One", "Rome fell, he said."]
+
+
+def test_footnote_markers_are_removed_from_toc_titles(tmp_path: Path) -> None:
+    docs = [("a.xhtml", '<h2 id="c1">One</h2><p>x</p>')]
+    nav = [("One [3]", "a.xhtml#c1", 1)]
+    assert [e.title for e in read_epub(make_epub(tmp_path, docs=docs, nav=nav)).toc] == ["One"]
+    ncx_dir = tmp_path / "ncx"
+    ncx_dir.mkdir()
+    ncx = make_epub(ncx_dir, docs=docs, nav=nav, ncx=True)
+    assert [e.title for e in read_epub(ncx).toc] == ["One"]
+
+
 # --------------------------------------------------------------------------- real books
 
 
@@ -427,6 +449,7 @@ def test_real_book_has_no_boilerplate(name: str) -> None:
     for block in doc.blocks:
         assert "project gutenberg" not in block.text.lower()
         assert "­" not in block.text
+        assert not re.search(r"\[(?:\*+|\d+)\]", block.text)
     for entry in doc.toc:
         assert "gutenberg" not in entry.title.lower()
 

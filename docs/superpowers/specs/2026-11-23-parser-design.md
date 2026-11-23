@@ -141,8 +141,10 @@ Steps:
    at 85–87 %). Heading-size lines (≥ 1.3 × body) are never candidates. Key = lower-cased text
    with digits (and private-use digit glyphs U+E000–U+F8FF) replaced by `#`. Keys that appear on
    ≥ 25 % of pages (and ≥ 3 pages) are removed everywhere in those zones (25 % because odd and even
-   pages alternate). Also remove any candidate line that is only a number: arabic digits,
-   private-use digit glyphs, or a roman numeral.
+   pages alternate). Also remove any candidate line that is only a number: arabic digits or
+   private-use digit glyphs. A roman numeral ("i", "XII") is removed only if number-only lines
+   occur in that same zone (top or bottom) on ≥ 3 pages, so a lone chapter label "I" at the top
+   of a page survives (A5).
 4. **Footnotes (dropped in MVP):** lines in the bottom 25 % of the page with font size
    ≤ 0.85 × body that are not headers/footers. Any body paragraph that starts with a footnote
    marker is dropped, wherever it is (Planet eBook sets footnotes as body-size paragraphs).
@@ -239,11 +241,31 @@ contract wording); afterwards it also sets `title_from_metadata=False` in that c
 
 ## 7. Test books
 
-| Book | Source | Expected (contract §7) | Measured |
+| Book | Source | Expected (contract §7) | Measured (A5) |
 |---|---|---|---|
-| Pride and Prejudice | gutenberg.org/ebooks/1342, EPUB no images (see below) | 61 × `chapter` | NCX has exactly 61 chapter entries (A2); final count in A4 |
-| The Prince | planetebook.com/free-ebooks/the-prince.pdf | 26 × `chapter`, introduction + dedication `front_matter` | outline has exactly 26 chapters; dedication is NOT in the outline (needs keyword rule); 2 extra works after ch. XXVI (D2) |
-| Meditations | gutenberg.org/ebooks/2680, EPUB3 with images | 12 × `chapter`, introduction `front_matter`, notes `back_matter` | nav has 12 book entries + INTRODUCTION, APPENDIX, NOTES, GLOSSARY (A2); "HIS FIRST BOOK" needs care in A4 |
+| Pride and Prejudice | gutenberg.org/ebooks/1342, EPUB no images (see below) | 61 × `chapter` | 61 × `chapter`; `front_matter`: "Front matter", PREFACE; no `back_matter` |
+| The Prince | planetebook.com/free-ebooks/the-prince.pdf | 26 × `chapter`, introduction + dedication `front_matter` | 26 × `chapter`; `front_matter`: "Front matter", INTRODUCTION, DEDICATION; `back_matter`: the two extra works (D2) |
+| Meditations | gutenberg.org/ebooks/2680, EPUB3 with images | 12 × `chapter`, introduction `front_matter`, notes `back_matter` | 12 × `chapter`; `front_matter`: INTRODUCTION, "HIS FIRST BOOK"; `back_matter`: APPENDIX, NOTES, GLOSSARY |
+
+Full position / kind / title / word-count lists:
+[`pride-and-prejudice.json`](../../../backend/tests/fixtures/books/expected/pride-and-prejudice.json),
+[`the-prince.json`](../../../backend/tests/fixtures/books/expected/the-prince.json),
+[`meditations.json`](../../../backend/tests/fixtures/books/expected/meditations.json).
+
+### Measured contents (A5, 23.11.2026)
+
+All three books: `chapters_detected` true, parse time 0.2–0.7 s, contract validation passes.
+
+- **Pride and Prejudice** (EPUB, 63 entries, 125,920 words): "Front matter" (72 words, text before
+  the PREFACE), PREFACE (George Saintsbury), then "Chapter I" … "CHAPTER LXI".
+- **The Prince** (PDF, 31 entries, 47,574 words): "Front matter" (51 words), INTRODUCTION,
+  DEDICATION, CHAPTER I … CHAPTER XXVI, then the two extra works as `back_matter` (D2): "DESCRIPTION
+  OF THE METHODS ADOPTED BY THE DUKE VALENTINO …" and "THE LIFE OF CASTRUCCIO CASTRACANI OF LUCCA".
+  The dedication is not in the PDF outline; it comes from the keyword rule.
+- **Meditations** (EPUB, 17 entries, 71,819 words): INTRODUCTION, "HIS FIRST BOOK" (126 words,
+  `front_matter`: it is the heading block before Book 1 and is kept as its own small entry),
+  "THE FIRST BOOK" … "THE TWELFTH BOOK", APPENDIX, NOTES, GLOSSARY. "Paragraphs with First Lines"
+  is dropped.
 
 If a measured count differs from the contract table, the test uses the measured value only after
 a manual check, and contract §7 is updated with Daris (it is a shared file).
@@ -275,8 +297,17 @@ files that are not well-formed. Page-number spans (`x-ebookmaker-pageno`) contai
 
 ## 8. Known limitations (go to README at integration)
 
-Multi-column PDFs, scanned PDFs (OCR is a stretch goal), poetry line breaks joined into one
-paragraph, hard hyphens at line end always joined, footnotes dropped, PDFs without outline rely on
-font-size heuristics, tables flattened to text. PDF: paragraphs without a first-line indent or a
-vertical gap between them are merged into one (e.g. the-prince.pdf pp. 188–190); indented poetry
-lines become separate paragraphs.
+- Scanned PDFs are not supported (no OCR; stretch goal); multi-column PDFs are read in the wrong
+  order.
+- PDFs without an outline rely on font-size heuristics for chapters.
+- Poetry line breaks are joined into one paragraph; indented poetry lines in a PDF become
+  separate paragraphs.
+- A hard hyphen at the end of a line is always joined ("well-" + "known" → "wellknown").
+- Footnotes are dropped, with their markers.
+- PDF paragraphs without a first-line indent or a vertical gap between them are merged into one
+  (the-prince.pdf pp. 188–190).
+- Tables are flattened to text.
+- The printed table of contents is found heuristically; an unusual one may stay in the text.
+- A "Prologue" / "Epilogue" heading that is not in the TOC does not start a new entry.
+- Meditations: the small heading block "HIS FIRST BOOK" is a separate `front_matter` entry.
+- The book title falls back to the file name when the file has none, until contract 1.1 (D3).

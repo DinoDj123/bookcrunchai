@@ -121,27 +121,49 @@ eBook.com" (odd pages) or "The Prince" (even pages), 7 pt; first-line indent x=5
 lines; line-end hyphenation uses U+00AD (soft hyphen); the PDF outline has 30 entries: "The Prince",
 "INTRODUCTION", CHAPTER I–XXVI, two entries with page −1.
 
+Re-measured in A3 (23.11.2026), differences from the facts above: the footer line spans y≈411–420
+of a 484 pt page, i.e. 85–87 % of the height, so it is **not** in the bottom 10 % (the reader uses
+a 15 % zone measured at the line centre); page numbers 2–9 are private-use glyphs U+F643+digit, not
+ASCII digits (from page 10 on they are digits); footnotes are **body-size** (10 pt) paragraphs that
+start with `[*]`, `[+]`, `[%]`, `[#]`, `[&]` or `[$]`, usually indented, placed after the paragraph
+that cites them (there is no small-type footnote text; all 7 pt text is the footer); the book title
+on page 1 is 24 pt (so chapter headings get `heading_level` 2); the titles of the two extra works
+(D2) are body-size all-caps paragraphs of 2–5 lines (up to 26 words); a drop cap with a trailing
+space (`"I "`, p. 20) is a whole word; the catalog has no `/Lang`. Everything else matches.
+
 Steps:
-1. Open; errors as in §2. `NO_TEXT_LAYER` check on raw text.
+1. Open; errors as in §2. A document with 0 pages (MuPDF "repairs" a badly truncated file into
+   an empty document instead of raising) → `CORRUPT_FILE`. `NO_TEXT_LAYER` check on raw text.
 2. Per page, `page.get_text("dict")` → lines with `bbox`, spans (size, flags, text). Body size =
    the font size with the most characters in the whole book.
 3. **Running headers/footers and page numbers:** a line is a candidate if it lies in the top or
-   bottom 10 % of the page height. Key = lower-cased text with digits replaced by `#`. Keys that
-   appear on ≥ 25 % of pages (and ≥ 3 pages) are removed everywhere in those zones (25 % because
-   odd and even pages alternate). Also remove any candidate line that is only an arabic or roman
-   number.
+   bottom 15 % of the page height, measured at the line centre (10 % missed the-prince.pdf footer
+   at 85–87 %). Heading-size lines (≥ 1.3 × body) are never candidates. Key = lower-cased text
+   with digits (and private-use digit glyphs U+E000–U+F8FF) replaced by `#`. Keys that appear on
+   ≥ 25 % of pages (and ≥ 3 pages) are removed everywhere in those zones (25 % because odd and even
+   pages alternate). Also remove any candidate line that is only a number: arabic digits,
+   private-use digit glyphs, or a roman numeral.
 4. **Footnotes (dropped in MVP):** lines in the bottom 25 % of the page with font size
-   ≤ 0.85 × body that are not headers/footers. Paragraphs that start with a footnote marker
-   (`[*]`, `[1]`, `*`) right after a heading are dropped; inline markers `[*]`, `[12]` are removed
-   from body text and titles by `text.strip_footnote_markers()`.
+   ≤ 0.85 × body that are not headers/footers. Any body paragraph that starts with a footnote
+   marker is dropped, wherever it is (Planet eBook sets footnotes as body-size paragraphs).
+   Paragraph-start markers: `[*]`, `[+]`, `[%]`, `[#]`, `[&]`, `[$]`, `[†]`, `[‡]`, `[§]` (also
+   repeated, e.g. `[**]`), 1–3 digit numbers (`[1]`, `[12]`), a bare `*`
+   (`text.starts_with_footnote_marker()`; `[a]` does not count). Inline markers (the same set
+   plus `[a]`–`[z]`) are removed from body text, headings and outline titles by
+   `text.strip_footnote_markers()`.
 5. **Drop caps:** a span ≥ 2 × body size containing a single letter is prefixed to the next body
-   line without a space (`N` + `icolo` → `Nicolo`).
-6. **Headings:** consecutive lines with size ≥ 1.3 × body are merged into one heading block
-   (`heading_level` 1 for the largest size, 2 for the next). An all-caps body-size line that is
-   alone in its paragraph and ≤ 12 words is a heading candidate with `heading_level=3` (used only by
-   pattern rules in `chapters.py`, e.g. "DEDICATION").
+   line beside it without a space (`N` + `icolo` → `Nicolo`); a cap whose text ends with a space is
+   a whole word (`"I "` + `will` → `I will`). Lines beside the cap are not first-line indents.
+6. **Headings:** consecutive lines of the same size ≥ 1.3 × body, closer than one font size, are
+   merged into one heading block (`heading_level` 1 for the largest heading size in the book, 2 for
+   every other heading size). An all-caps body-size paragraph (it may span several lines) of
+   ≤ 30 words is a heading candidate with `heading_level=3` (used only by pattern rules in
+   `chapters.py`, e.g. "DEDICATION" and the D2 extra-work titles).
 7. **Paragraphs:** a new paragraph starts when the line's x0 is ≥ 0.8 × body size to the right of
-   the page's common left margin (first-line indent), or the vertical gap to the previous line is
+   the common left margin (first-line indent; measured over the whole book, separately for odd
+   and even pages, so a page of only indented one-line paragraphs still splits; consecutive
+   indented lines at the same x continue unless the previous one is under 93 % of the
+   column), or the vertical gap to the previous line is
    > 1.5 × the common line spacing, or after a heading. A paragraph continues across a page break
    unless the last line of the page was short (< 85 % of column width) and ended with `.?!:”’`.
    `page` = page where the paragraph starts.
@@ -255,4 +277,6 @@ files that are not well-formed. Page-number spans (`x-ebookmaker-pageno`) contai
 
 Multi-column PDFs, scanned PDFs (OCR is a stretch goal), poetry line breaks joined into one
 paragraph, hard hyphens at line end always joined, footnotes dropped, PDFs without outline rely on
-font-size heuristics, tables flattened to text.
+font-size heuristics, tables flattened to text. PDF: paragraphs without a first-line indent or a
+vertical gap between them are merged into one (e.g. the-prince.pdf pp. 188–190); indented poetry
+lines become separate paragraphs.

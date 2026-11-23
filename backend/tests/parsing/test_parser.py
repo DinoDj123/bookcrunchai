@@ -11,7 +11,7 @@ from app.parsing.contract import (
 )
 from app.parsing.parser import parse_book
 
-from .builders import make_epub, paragraphs
+from .builders import make_epub, make_pdf, paragraphs
 from .test_epub import GUTENBERG_FOOTER, GUTENBERG_HEADER
 
 BOOKS = Path(__file__).parent.parent / "fixtures" / "books"
@@ -87,3 +87,40 @@ def test_real_epub_smoke(name: str, title: str, author: str) -> None:
 @pytest.mark.parametrize("name", ["pride-and-prejudice.epub", "meditations.epub"])
 def test_real_epub_is_deterministic(name: str) -> None:
     assert parse_book(BOOKS / name).to_dict() == parse_book(BOOKS / name).to_dict()
+
+
+def test_synthetic_pdf_end_to_end(tmp_path: Path) -> None:
+    lines = [
+        (
+            f"line {i} of ordinary words that fill a whole line of the page",
+            50.0,
+            100.0 + 12 * i,
+            10.0,
+        )
+        for i in range(10)
+    ]
+    path = make_pdf(
+        tmp_path,
+        [lines, lines],
+        footer_numbers=True,
+        metadata={"title": "Microsoft Word - draft.docx", "author": "Ann Writer"},
+        language="en-US",
+        name="my_pdf-book.pdf",
+    )
+    book = parse_book(path)
+    validate_parsed_book(book)
+    assert (book.title, book.author, book.language) == ("my pdf book", "Ann Writer", "en")
+    assert book.file_format is FileFormat.PDF
+    assert [p.page for c in book.chapters for p in c.paragraphs] == [1]
+
+
+def test_real_pdf_smoke() -> None:
+    book = parse_book(BOOKS / "the-prince.pdf")
+    validate_parsed_book(book)
+    assert (book.title, book.author, book.language) == ("The Prince", "Nicolo Machiavelli", None)
+    assert book.file_format is FileFormat.PDF
+    assert book.chapters_detected is False
+    assert book.chapters[0].title == "Part 1"
+    pages = [p.page for c in book.chapters for p in c.paragraphs]
+    assert pages[0] == 1 and pages == sorted(pages)  # type: ignore[type-var]
+    assert book.to_dict() == parse_book(BOOKS / "the-prince.pdf").to_dict()

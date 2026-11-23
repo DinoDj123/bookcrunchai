@@ -1,11 +1,12 @@
 import pytest
 
-from app.parsing.boilerplate import is_gutenberg_end, is_gutenberg_start
+from app.parsing.boilerplate import is_gutenberg_end, is_gutenberg_start, is_publisher_promo
 from app.parsing.text import (
     clean_title,
     cut_at_word,
     join_hyphenated,
     language_code,
+    starts_with_footnote_marker,
     strip_footnote_markers,
 )
 
@@ -32,6 +33,10 @@ def test_join_hyphenated(raw: str, expected: str) -> None:
         ("Rome[*] fell", "Rome fell"),
         ("as said [12].", "as said."),
         ("note[a] here", "note here"),
+        (
+            "Louis[*] (and not of Charles[+]) and Acuto,[%] then",
+            "Louis (and not of Charles) and Acuto, then",
+        ),
         ("[*]", ""),
         ("arrays [i, j] stay", "arrays [i, j] stay"),
         ("no markers", "no markers"),
@@ -39,6 +44,22 @@ def test_join_hyphenated(raw: str, expected: str) -> None:
 )
 def test_strip_footnote_markers(raw: str, expected: str) -> None:
     assert strip_footnote_markers(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("[*] Duke Lodovico was Lodovico Moro.", True),
+        ("[+] Louis XI, son of the above.", True),
+        ("[12] See the introduction.", True),
+        ("* A note.", True),
+        ("[a] first item", False),
+        ("Rome[*] fell", False),
+        ("Plain text.", False),
+    ],
+)
+def test_starts_with_footnote_marker(text: str, expected: bool) -> None:
+    assert starts_with_footnote_marker(text) is expected
 
 
 @pytest.mark.parametrize(
@@ -91,3 +112,28 @@ def test_gutenberg_markers() -> None:
     assert is_gutenberg_end("*** end of the project gutenberg ebook meditations ***")
     assert not is_gutenberg_start("Project Gutenberg is a library")
     assert not is_gutenberg_end("*** START OF THE PROJECT GUTENBERG EBOOK")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Download free eBooks of classic literature, books and novels at Planet eBook. "
+        "Subscribe to our free eBooks blog and email newsletter.",
+        "Free eBooks at Planet eBook.com",
+        "DOWNLOAD FREE EBOOKS OF CLASSIC LITERATURE AT PLANET EBOOK",
+    ],
+)
+def test_publisher_promo_detected(text: str) -> None:
+    assert is_publisher_promo(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The planet was a book of free ebooks.",
+        "Subscribe to our newsletter.",
+        "He read classic literature all day.",
+    ],
+)
+def test_ordinary_text_is_not_publisher_promo(text: str) -> None:
+    assert not is_publisher_promo(text)

@@ -10,6 +10,8 @@ from html import escape
 from pathlib import Path
 from urllib.parse import unquote
 
+import pymupdf
+
 # (title, href) or (title, href, level); href is relative to the OEBPS folder.
 NavEntry = tuple[str, str] | tuple[str, str, int]
 
@@ -166,3 +168,72 @@ def paragraphs(n: int, words: int = 10, prefix: str = "w") -> str:
     return "\n".join(
         "<p>" + " ".join(f"{prefix}{i}x{j}" for j in range(words)) + "</p>" for i in range(n)
     )
+
+
+# (text, x, baseline y, font size) in PDF points, origin at the top left of the page.
+PdfLine = tuple[str, float, float, float]
+
+PDF_PAGE_WIDTH = 400.0
+PDF_PAGE_HEIGHT = 600.0
+# Baselines of the running header and of the page number, inside the top / bottom 15 %.
+_PDF_HEADER_Y = 40.0
+_PDF_FOOTER_Y = 570.0
+_PDF_MARGIN_SIZE = 9.0
+
+
+def make_pdf(
+    tmp_path: Path,
+    pages: list[list[PdfLine]],
+    *,
+    header: str | None = None,
+    footer_numbers: bool = False,
+    password: str | None = None,
+    outline: list[tuple[int, str, int]] | None = None,
+    metadata: dict[str, str] | None = None,
+    language: str | None = None,
+    name: str = "book.pdf",
+) -> Path:
+    """Write a PDF with every line at a controlled position and size and return its path.
+
+    Text is written with a TextWriter (Helvetica) so a soft hyphen stays U+00AD in the text layer.
+    A page without lines gets only a small image, like a scanned page. `header` is printed at the
+    top of every page and `footer_numbers` prints the page number at the bottom.
+    `outline` entries are (level, title, page); page -1 makes an entry without a target.
+    """
+    font = pymupdf.Font("helv")
+    doc = pymupdf.open()
+    for number, lines in enumerate(pages, start=1):
+        page = doc.new_page(width=PDF_PAGE_WIDTH, height=PDF_PAGE_HEIGHT)
+        writer = pymupdf.TextWriter(page.rect)
+        all_lines = list(lines)
+        if header is not None:
+            all_lines.append((header, 50.0, _PDF_HEADER_Y, _PDF_MARGIN_SIZE))
+        if footer_numbers:
+            all_lines.append((str(number), PDF_PAGE_WIDTH / 2, _PDF_FOOTER_Y, _PDF_MARGIN_SIZE))
+        for text, x, y, size in all_lines:
+            writer.append((x, y), text, font=font, fontsize=size)
+        if all_lines:
+            writer.write_text(page)
+        if not lines:
+            pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), False)
+            pixmap.clear_with(128)
+            page.insert_image(pymupdf.Rect(50, 50, 350, 550), pixmap=pixmap)
+    if outline is not None:
+        doc.set_toc([list(entry) for entry in outline])
+    if metadata is not None:
+        doc.set_metadata(metadata)
+    if language is not None:
+        doc.xref_set_key(doc.pdf_catalog(), "Lang", pymupdf.get_pdf_str(language))
+
+    path = tmp_path / name
+    if password is None:
+        doc.save(path)
+    else:
+        doc.save(
+            path,
+            encryption=pymupdf.PDF_ENCRYPT_AES_256,
+            user_pw=password,
+            owner_pw=password,
+        )
+    doc.close()
+    return path

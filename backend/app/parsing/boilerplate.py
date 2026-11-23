@@ -23,3 +23,17 @@ def is_gutenberg_start(text: str) -> bool:
 def is_gutenberg_end(text: str) -> bool:
     """True if the text contains the '*** END OF THE PROJECT GUTENBERG EBOOK' marker."""
     return _END.search(text) is not None
+
+
+# Planet eBook (the-prince.pdf) prints a promotion block on its first page and "Free eBooks at
+# Planet eBook.com" as a running footer. Only these two wordings are matched, not any mention of
+# the publisher, so ordinary text is never dropped.
+_PUBLISHER_PROMO = re.compile(
+    r"free e-?books at planet e-?book|download free e-?books\b.*\bplanet e-?book",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def is_publisher_promo(text: str) -> bool:
+    """True for Planet eBook promotional text ("Download free eBooks ... at Planet eBook")."""
+    return _PUBLISHER_PROMO.search(text) is not None

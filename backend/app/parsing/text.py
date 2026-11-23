@@ -14,8 +14,13 @@ _SOFT_HYPHEN_BREAK = re.compile(r"­[ \t]*\r?\n[ \t]*")
 _HARD_HYPHEN_LOWER = re.compile(r"(?<=\w)-[ \t]*\r?\n[ \t]*(?=[a-z])")
 _HARD_HYPHEN_OTHER = re.compile(r"(?<=\w)-[ \t]*\r?\n[ \t]*(?=\w)")
 
-# Footnote markers such as "[*]", "[12]", "[a]" (Gutenberg and Planet eBook style).
-_FOOTNOTE_MARKER = re.compile(r"\s*\[(?:\*+|\d{1,3}|[a-z])\]")
+# Footnote markers such as "[*]", "[12]", "[a]" (Gutenberg and Planet eBook style). Planet eBook
+# numbers several notes on one page with symbols: "[*]", "[+]", "[%]", "[#]", "[&]", "[$]".
+_FOOTNOTE_SYMBOLS = r"[*+%#&$†‡§]+"
+_FOOTNOTE_MARKER = re.compile(rf"\s*\[(?:{_FOOTNOTE_SYMBOLS}|\d{{1,3}}|[a-z])\]")
+# The text of a footnote starts with its marker; a bare "*" counts too. "[a]" does not, because
+# lettered list items look the same.
+_FOOTNOTE_START = re.compile(rf"\s*(?:\[(?:{_FOOTNOTE_SYMBOLS}|\d{{1,3}})\]|\*)")
 
 # BCP 47 tag: primary language subtag of 2-3 letters, optionally followed by subtags.
 _LANGUAGE_TAG = re.compile(r"^([A-Za-z]{2,3})(?:[-_][A-Za-z0-9]{1,8})*$")
@@ -34,6 +39,11 @@ def join_hyphenated(text: str) -> str:
 def strip_footnote_markers(text: str) -> str:
     """Remove inline footnote markers like "[*]" and "[12]"."""
     return _FOOTNOTE_MARKER.sub("", text)
+
+
+def starts_with_footnote_marker(text: str) -> bool:
+    """True for the text of a footnote: "[*] Duke Lodovico was ...", "[12] See ...", "* Note"."""
+    return _FOOTNOTE_START.match(text) is not None
 
 
 def language_code(raw: str | None) -> str | None:

@@ -80,6 +80,19 @@ def test_get_parse_book_selects_implementation(monkeypatch) -> None:
 
 def test_round_trip_through_dict(book: ParsedBook) -> None:
     assert ParsedBook.from_dict(book.to_dict()) == book
+    untitled = replace(book, title="book", title_from_metadata=False)
+    assert ParsedBook.from_dict(untitled.to_dict()) == untitled
+
+
+def test_title_from_metadata_defaults_to_true(book: ParsedBook) -> None:
+    assert book.title_from_metadata is True
+    data = book.to_dict()
+    del data["title_from_metadata"]  # a dictionary written under contract 1.0
+    assert ParsedBook.from_dict(data).title_from_metadata is True
+
+
+def test_validator_accepts_title_from_file_name(book: ParsedBook) -> None:
+    validate_parsed_book(replace(book, title="my book", title_from_metadata=False))
 
 
 def test_word_counts_are_consistent(book: ParsedBook) -> None:
@@ -125,6 +138,7 @@ def _book(*chapters: Chapter, **kwargs) -> ParsedBook:
                            file_format=FileFormat.PDF), id="pages going back"),
         pytest.param(_book(_chapter(1), title="  "), id="blank title"),
         pytest.param(_book(_chapter(1), language="en-US"), id="language not normalized"),
+        pytest.param(_book(_chapter(1), title_from_metadata="no"), id="title_from_metadata not a bool"),
         pytest.param(_book(_chapter(1, title="Chapter 1"), chapters_detected=False), id="fallback without Part N"),
     ],
 )

@@ -1,8 +1,8 @@
-# bookcrunch.ai — Software Specification v1.4 (Markdown copy)
+# bookcrunch.ai — Software Specification v1.5 (Markdown copy)
 
-Team Bookcrunch.ai · Daris Velović, Dino Đerekerac · Mentors: Ana Pješivac, Tamara Pavlović · 21.11.2026
+Team Bookcrunch.ai · Daris Velović, Dino Đerekerac · Mentors: Ana Pješivac, Tamara Pavlović · 23.11.2026
 
-> This is a text copy of `bookcrunch_software_specification_v1.4.docx` so that Claude Code can read it.
+> This is a text copy of `bookcrunch_software_specification_v1.5.docx` so that Claude Code can read it.
 > The Word document is the official version sent to the mentors; diagrams and wireframes are only there.
 > When the Word document changes, regenerate this file.
 
@@ -678,7 +678,7 @@ This pattern was chosen because the team has two developers and four weeks. One 
 | Frontend         | Pages for login, library, upload, book (summary, ask, contents, cost) and chapter reader; polling of job status; rendering of citations and links to passages. | Next.js (App Router), React, TypeScript, Tailwind CSS |
 | Backend API      | Authentication, validation, ownership checks, book and summary endpoints, question answering, queuing of jobs, OpenAPI documentation.                          | Python, FastAPI, Pydantic, SQLAlchemy                 |
 | Worker           | Runs the pipeline: parse → chunk → embed → chapter notes, and summary generation; retries; progress updates; usage records.                                    | Python, ARQ                                           |
-| Parsing module   | EPUB and PDF text extraction, clean-up and chapter detection; returns a ParsedBook. No dependency on the web framework or the database.                        | EbookLib, BeautifulSoup, PyMuPDF                      |
+| Parsing module   | EPUB and PDF text extraction, clean-up and chapter detection; returns a ParsedBook. No dependency on the web framework or the database.                        | zipfile, BeautifulSoup (lxml), PyMuPDF                |
 | LLM client       | One wrapper for all Claude API calls: prompts, retries, structured output validation, recording of tokens and cost.                                            | Anthropic Python SDK                                  |
 | Retrieval module | Embedding of chunks and questions, vector search, citation verification.                                                                                       | Voyage AI API, pgvector                               |
 | Database         | Users, books, chapters, chunks with embeddings, summaries, questions, citations, jobs and usage.                                                               | PostgreSQL with pgvector                              |
@@ -745,7 +745,7 @@ An uploaded book or a demo book.
 |-------------------|--------------|--------------------------------|--------------------------------------------|
 | id                | UUID         | PK                             | Unique identifier                          |
 | owner_id          | UUID         | FK → users.id, NOT NULL        | Uploading user (seed user for demo books)  |
-| title             | VARCHAR(500) | NOT NULL                       | From metadata, or the file name if missing |
+| title             | VARCHAR(500) | NOT NULL                       | From metadata, or the uploaded file name if missing |
 | author            | VARCHAR(300) | NULL                           | From metadata                              |
 | source_language   | VARCHAR(8)   | NULL                           | Detected language of the book              |
 | file_format       | VARCHAR(4)   | NOT NULL, epub \| pdf          | Format of the uploaded file                |
@@ -1179,7 +1179,7 @@ The stack follows the one suggested in the project brief. Versions are the major
 | Database           | PostgreSQL + pgvector                     | 17 / 0.8          | Relational data and vector search in one database; one service fewer than a dedicated vector store.                                                 |
 | ORM and migrations | SQLAlchemy + Alembic                      | 2.x / 1.x         | Standard for FastAPI; versioned schema migrations.                                                                                                  |
 | Job queue          | ARQ + Redis                               | 0.26+ / 7.x       | Small async queue with retries; fits async FastAPI and the async Claude client.                                                                     |
-| EPUB parsing       | EbookLib + BeautifulSoup                  | 0.18+ / 4.x       | Reads package metadata, spine and navigation; HTML to clean text.                                                                                   |
+| EPUB parsing       | zipfile + BeautifulSoup + lxml            | – / 4.x / 5.x     | Reads the package (OPF), spine and navigation from the archive; XHTML to clean text. EbookLib is not used (Appendix D).                             |
 | PDF parsing        | PyMuPDF                                   | 1.24+             | Text with position and font size, needed to remove headers and footers and to detect headings. Licence note in Appendix E.                          |
 | LLM                | Claude API (Anthropic Python SDK)         | current           | Required by the brief. A smaller, cheaper model for chapter notes and a stronger model for the book summary and Q&A; model names are configuration. |
 | Embeddings         | Voyage AI (voyage-4 family)               | 1,024 dimensions  | Multilingual, so Montenegrin questions work on English books; Anthropic does not provide an embedding model.                                        |
@@ -1298,6 +1298,7 @@ Both members are full-stack developers. Work is split into two tracks that touch
 | 1.2 | 21.11.2026 | Daris Velović | Same-book rules enforced by the database: book_id and composite foreign keys on chapter_summaries, key_ideas and citations; CHECK that emails are stored in lower case; new rule that a citation references a chunk of the question’s book (6.3) |
 | 1.3 | 21.11.2026 | Daris Velović | Job queue implemented: parser failures fail a job at once, other errors are retried up to 3 attempts (Appendix C); decisions on job retries and job results (Appendix D) |
 | 1.4 | 21.11.2026 | Daris Velović | Authentication, upload and job status implemented: register response and EMAIL_TAKEN, cookie name and Secure rule (7.3); 503 QUEUE_UNAVAILABLE on upload (7.1, 7.2); books.file_path is relative to the storage directory (6.2); decisions on upload without a queue and on the login answer (Appendix D) |
+| 1.5 | 23.11.2026 | Daris Velović, Dino Đerekerac | parse_book contract 1.1: a book without a metadata title keeps the uploaded file name as its title (6.2); decision on the book title (Appendix D). EPUB files are read with zipfile and BeautifulSoup instead of EbookLib (5.3, 9, Appendix B; decision in Appendix D) |
 
 # Appendices
 
@@ -1342,7 +1343,7 @@ Both members are full-stack developers. Work is split into two tracks that touch
 
 - PyMuPDF documentation: https://pymupdf.readthedocs.io
 
-- EbookLib: https://github.com/aerkalov/ebooklib
+- Beautiful Soup documentation: https://www.crummy.com/software/BeautifulSoup/bs4/doc/
 
 ## C. Additional Diagrams
 
@@ -1394,6 +1395,8 @@ Significant decisions and the alternatives that were rejected.
 | Job results | Kept only in PostgreSQL; ARQ stores no result in Redis (keep_result = 0) and the ARQ job ID is the job’s UUID | Keeping ARQ results: a second copy of the status, and a kept result blocks queuing the same job ID again, which retrying a failed job needs. |
 | Upload when the queue is down | The book, its job and the stored file are removed and the API answers 503 QUEUE_UNAVAILABLE; the user uploads again | Keeping the book with a job nobody will run: it would stay “uploaded” forever, and uploading the file again would only return that stuck book (FR-014). Enqueuing before the database commit: the worker could look for a job that is not saved yet. |
 | Login answer | The same 401 INVALID_CREDENTIALS for an unknown email and a wrong password, and a password hash is checked in both cases | Separate messages or a faster answer for unknown emails: would reveal which addresses have an account. |
+| Book title without metadata | The parser reports `title_from_metadata = False` and the worker keeps the title set at upload (the cleaned original file name) | Parser falls back to the stored file name: files are stored as `<uuid>.<ext>`, so the title would be a UUID. Passing the original file name to `parse_book()`: changes the function's signature (contract 2.0) for a value the database already has. |
+| EPUB reading | Python’s zipfile module and BeautifulSoup with the lxml parser read the package file, the spine and the navigation directly | EbookLib (named in versions 1.0–1.4): no control over which error becomes which parser error code, no help with the element-level anchors that chapter splitting needs, and one more dependency under the AGPL licence for about 80 lines of package and navigation reading. |
 
 ## E. Open Questions for the Mentor
 

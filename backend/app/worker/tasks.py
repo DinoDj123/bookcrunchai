@@ -147,7 +147,10 @@ async def _save_parsed_book(session: AsyncSession, book: Book, parsed: ParsedBoo
         )
         for chapter in parsed.chapters
     )
-    book.title = parsed.title
+    # Without a metadata title the parser only has the stored file name, which is a UUID; the title
+    # set at upload (the cleaned original file name) is better, so it stays (contract 1.1, 5.4).
+    if parsed.title_from_metadata:
+        book.title = parsed.title
     book.author = parsed.author
     book.source_language = parsed.language
     book.word_count = parsed.word_count

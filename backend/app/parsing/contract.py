@@ -1,4 +1,4 @@
-"""parse_book contract, version 1.0.
+"""parse_book contract, version 1.1.
 
 This file is shared between the two tracks:
   - Track A (parser, Dino) produces a ParsedBook.
@@ -17,7 +17,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "1.1"
 
 MAX_TITLE_LENGTH = 500
 MAX_AUTHOR_LENGTH = 300
@@ -111,6 +111,9 @@ class ParsedBook:
     file_format: FileFormat
     chapters_detected: bool     # False when the book was split into "Part N" fallback parts
     chapters: tuple[Chapter, ...]
+    # False when the book has no title in its metadata and `title` is only the cleaned file name.
+    # The worker then keeps the title from the upload (the stored file is named <uuid>.<ext>).
+    title_from_metadata: bool = True
 
     @property
     def word_count(self) -> int:
@@ -121,6 +124,7 @@ class ParsedBook:
         return {
             "contract_version": CONTRACT_VERSION,
             "title": self.title,
+            "title_from_metadata": self.title_from_metadata,
             "author": self.author,
             "language": self.language,
             "file_format": self.file_format.value,
@@ -140,6 +144,7 @@ class ParsedBook:
     def from_dict(cls, data: dict[str, Any]) -> ParsedBook:
         return cls(
             title=data["title"],
+            title_from_metadata=data.get("title_from_metadata", True),  # absent in 1.0 dictionaries
             author=data["author"],
             language=data["language"],
             file_format=FileFormat(data["file_format"]),
@@ -209,6 +214,8 @@ def validate_parsed_book(book: ParsedBook) -> None:
         add("title must be non-empty and normalized")
     elif len(book.title) > MAX_TITLE_LENGTH:
         add(f"title longer than {MAX_TITLE_LENGTH} characters")
+    if not isinstance(book.title_from_metadata, bool):
+        add("title_from_metadata must be a bool")
     if book.author is not None:
         if not book.author or book.author != normalize_text(book.author):
             add("author must be None or a non-empty normalized string")

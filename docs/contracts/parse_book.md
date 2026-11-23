@@ -1,4 +1,4 @@
-# parse_book contract — version 1.0
+# parse_book contract — version 1.1
 
 This is the agreement between the two tracks of bookcrunch.ai:
 
@@ -32,6 +32,7 @@ def parse_book(file_path: Path) -> ParsedBook: ...
 ```
 ParsedBook
 ├── title: str                 metadata title, otherwise the cleaned file name; never empty
+├── title_from_metadata: bool  False when title is only the cleaned file name (default True)
 ├── author: str | None
 ├── language: str | None       lowercase ISO 639 code: "en", "it", "cnr"; "en-US" becomes "en"
 ├── file_format: FileFormat    "epub" | "pdf"
@@ -47,6 +48,11 @@ ParsedBook
 ```
 
 All classes are frozen dataclasses. Collections are **tuples**, not lists.
+
+Uploaded files are stored as `<uuid>.<ext>`, so the "file name" the parser sees is a UUID. When the
+book has no title in its metadata, the parser still returns a non-empty `title` (the cleaned file
+name) but sets `title_from_metadata = False`; the worker then keeps the title from the upload
+(section 5, rule 4).
 
 ## 3. Rules for the producer (Track A)
 
@@ -67,9 +73,13 @@ Every rule below is checked by `validate_parsed_book()` unless marked *(not chec
    hyphens or zero-width characters, every whitespace run collapsed to one space, trimmed.
    A paragraph therefore never contains a newline.
 7. Words hyphenated across a line break are joined (`con-` + `tent` → `content`). *(not checked)*
-8. PDF running headers, footers and page numbers are removed. Footnotes are dropped in the MVP.
-   *(not checked)*
-9. The table of contents printed inside the book is not returned as text. *(not checked)*
+   Known limitation: a real compound broken exactly at its hyphen (`well-` / `known`) cannot be told
+   apart from a hyphenated word and is joined too (`wellknown`).
+8. PDF running headers, footers and page numbers are removed. Footnotes are dropped in the MVP,
+   together with their markers in the text and in titles (for example `CHAPTER XVIII[*].` becomes
+   `CHAPTER XVIII.`). *(not checked)*
+9. The table of contents and the list of illustrations printed inside the book are not returned as
+   text. *(not checked)*
 10. Project Gutenberg licence header and footer are removed completely; they are not front or back
     matter. *(not checked)*
 
@@ -77,7 +87,8 @@ Every rule below is checked by `validate_parsed_book()` unless marked *(not chec
 - `front_matter`: title page text, dedication, preface, foreword, introduction by an editor or
   translator.
 - `chapter`: the author's main text, including prologue and epilogue.
-- `back_matter`: notes, appendix, glossary, index, afterword, bibliography.
+- `back_matter`: notes, appendix, glossary, index, afterword, bibliography, and other works
+  printed after the main text (for example the two shorter works after chapter XXVI of The Prince).
 
 **Pages**
 11. EPUB: every `page` is `None`.
@@ -96,9 +107,12 @@ Every rule below is checked by `validate_parsed_book()` unless marked *(not chec
 |---|---|---|
 | `UNSUPPORTED_FORMAT` | Signature is neither EPUB nor PDF | This file is not an EPUB or a PDF. |
 | `CORRUPT_FILE` | File cannot be opened or read | The file is damaged and could not be read. |
-| `ENCRYPTED_FILE` | DRM or password protection | The file is protected (DRM or password) and cannot be processed. |
+| `ENCRYPTED_FILE` | DRM or password protection (see note below) | The file is protected (DRM or password) and cannot be processed. |
 | `NO_TEXT_LAYER` | PDF averages fewer than 100 characters of text per page | This PDF contains scanned images without text. Scanned books are not supported yet. |
 | `EMPTY_BOOK` | No main text left after clean-up | No readable text was found in this book. |
+
+An EPUB whose `META-INF/encryption.xml` covers only fonts (IDPF or Adobe font obfuscation) is not
+protected: the text is readable, so it is parsed normally and never raises `ENCRYPTED_FILE`.
 
 ```python
 raise ParseError(ParseErrorCode.NO_TEXT_LAYER, "12 chars/page on average")
@@ -120,7 +134,8 @@ raise ParseError(ParseErrorCode.NO_TEXT_LAYER, "12 chars/page on average")
    | Any other exception | `failed` | `PARSER_INTERNAL_ERROR` |
 
    For the last two, log the full error and show a generic message; they are bugs for Track A.
-4. Store from the result: book `title`, `author`, `source_language` ← `language`, `word_count`,
+4. Store from the result: book `title` (only when `title_from_metadata` is True; otherwise keep the
+   title from the upload), `author`, `source_language` ← `language`, `word_count`,
    `chapters_detected`; for each entry a `chapters` row with `position`, `title`, `kind`,
    `word_count`. In Week 1 paragraph text is not stored; chunks are added in Week 2.
 5. Use `count_words()` whenever words are counted anywhere else in the project.
@@ -146,7 +161,7 @@ Track A writes tests that parse each book, call `validate_parsed_book()` and com
 | Book | File | Expected (verify on the real file) |
 |---|---|---|
 | Pride and Prejudice | EPUB, Project Gutenberg | 61 entries of kind `chapter`; no Gutenberg licence text |
-| The Prince | PDF, Planet eBook | 26 entries of kind `chapter`; introduction and dedication as `front_matter`; no "The Prince" footer lines; no page numbers in text |
+| The Prince | PDF, Planet eBook | 26 entries of kind `chapter`; introduction and dedication as `front_matter`; "Description of the Methods Adopted by the Duke Valentino…" and "The Life of Castruccio Castracani" as `back_matter`; no "The Prince" footer lines; no page numbers in text |
 | Meditations | EPUB, Project Gutenberg | 12 entries of kind `chapter` (the twelve books); introduction as `front_matter`; notes as `back_matter` |
 
 Test files are kept in `backend/tests/fixtures/books/` (public domain, safe to commit).
@@ -163,3 +178,4 @@ Test files are kept in `backend/tests/fixtures/books/` (public domain, safe to c
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 20.11.2026 | First version |
+| 1.1 | 23.11.2026 | New field `title_from_metadata` (the worker keeps the upload title when it is False); footnote markers and the list of illustrations are dropped; font obfuscation is not `ENCRYPTED_FILE`; other works after the main text are `back_matter`; known limitation of rule 7. Proposed by Dino Đerekerac after checking the contract on the-prince.pdf |

@@ -340,6 +340,32 @@ def test_contents_and_list_of_illustrations_are_dropped() -> None:
     assert [c.title for c in chapters] == ["Chapter 1", "Chapter 2"]
 
 
+def test_drop_keywords_need_the_whole_title() -> None:
+    titles = [
+        ("Chapter 1", "text one"),
+        ("Contents of the Will", "The will."),
+        ("List of Grievances", "The grievances."),
+        ("Illustrations of Grief", "The grief."),
+        ("CONTENTS.", "Chapter 1 3"),
+        ("Chapter 2", "text two"),
+    ]
+    blocks: list[Block] = []
+    toc: list[TocEntry] = []
+    for i, (title, text) in enumerate(titles):
+        blocks += [head(title, 2, None, f"a#{i}"), para(text)]
+        toc.append(TocEntry(title, 1, f"a#{i}"))
+    chapters, _ = check(doc(blocks, toc))
+    assert summary(chapters) == [
+        ("Chapter 1", C),
+        ("Contents of the Will", C),
+        ("List of Grievances", C),
+        ("Illustrations of Grief", C),
+        ("Chapter 2", C),
+    ]
+    assert chapters[1].paragraphs[0].text == "The will."
+    assert chapters[2].paragraphs[0].text == "The grievances."
+
+
 def test_toc_like_entry_is_dropped() -> None:
     blocks = [
         head("Overview"),
@@ -481,6 +507,9 @@ def test_classify_kind() -> None:
     assert classify_kind("Sadržaj") is None
     assert classify_kind("The Storm") is C
     assert classify_kind("Indexing the world") is C
+    assert classify_kind("CONTENTS.") is None
+    assert classify_kind("Contents of the Will") is C
+    assert classify_kind("List of Grievances") is C
     assert FRONT_KEYWORDS and BACK_KEYWORDS and DROP_KEYWORDS
 
 

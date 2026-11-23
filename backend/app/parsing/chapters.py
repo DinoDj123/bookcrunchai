@@ -76,7 +76,6 @@ DROP_KEYWORDS = (
     "contents",
     "table of contents",
     "list of illustrations",
-    "list of",
     "illustrations",
     "sadržaj",
 )
@@ -88,7 +87,8 @@ def _keyword_regex(words: Sequence[str]) -> re.Pattern[str]:
 
 _FRONT_RE = _keyword_regex(FRONT_KEYWORDS)
 _BACK_RE = _keyword_regex(BACK_KEYWORDS)
-_DROP_RE = _keyword_regex(DROP_KEYWORDS)
+# Drop keywords must equal the whole title: "Contents of the Will" is a real chapter.
+_DROP_TITLES = frozenset(DROP_KEYWORDS)
 
 # Heading blocks with a keyword title become boundaries only if the heading is short.
 MAX_KEYWORD_HEADING_WORDS = 8
@@ -170,7 +170,7 @@ def _keyword_text(title: str) -> str:
 def classify_kind(title: str) -> ChapterKind | None:
     """Kind from the title keywords; None means "drop this entry" (contract rule 9)."""
     text = _keyword_text(title)
-    if _DROP_RE.match(text):
+    if text.lower() in _DROP_TITLES:
         return None
     if _FRONT_RE.match(text):
         return ChapterKind.FRONT_MATTER

@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from pathlib import Path
 
@@ -87,6 +87,8 @@ class _Layout:
 
     body_size: float
     line_spacing: float
+    # Left margin of body lines on odd and even pages, None if that parity has no body lines.
+    margins: tuple[float | None, float | None] = (None, None)
 
     @property
     def heading_size(self) -> float:
@@ -120,6 +122,7 @@ def read_pdf(path: Path) -> RawDocument:
     layout = _measure_layout(pages)
     pages = _remove_running_lines(pages, layout)
     pages = _remove_small_footnotes(pages, layout)
+    layout = replace(layout, margins=_measure_margins(pages, layout))
     blocks = _build_blocks(pages, layout)
     return RawDocument(
         title=title,
@@ -201,6 +204,20 @@ def _measure_layout(pages: list[_Page]) -> _Layout:
                 steps[step] += 1
     line_spacing = _most_common(steps) if steps else body_size * 1.2
     return _Layout(body_size, line_spacing)
+
+
+def _measure_margins(pages: list[_Page], layout: _Layout) -> tuple[float | None, float | None]:
+    """Left margin of body lines over the whole book, for odd and even pages separately.
+
+    Measured per book, not per page: a page of only first-line-indented one-line paragraphs has
+    no line at the real margin, so its own most common start would be the indent (design §4).
+    """
+    starts: tuple[Counter[float], Counter[float]] = (Counter(), Counter())
+    for page in pages:
+        counter = starts[page.number % 2 == 0]
+        counter.update(float(round(ln.x0)) for ln in page.lines if not layout.is_heading(ln))
+    odd, even = (_most_common(c) if c else None for c in starts)
+    return odd, even
 
 
 def _most_common(counter: Counter[float]) -> float:
@@ -363,12 +380,14 @@ def _paragraphs(pages: list[_Page], layout: _Layout) -> list[_Paragraph]:
 
 
 def _column(page: _Page, layout: _Layout) -> tuple[float | None, float]:
-    """Common left margin (most frequent body line start) and right edge of the body text."""
+    """Left margin (book-wide for this page parity) and right edge of the body text."""
     body = [line for line in page.lines if not layout.is_heading(line)]
     if not body:
         return None, 0.0
-    starts: Counter[float] = Counter(float(round(line.x0)) for line in body)
-    return _most_common(starts), max(line.x1 for line in body)
+    margin = layout.margins[page.number % 2 == 0]
+    if margin is None:  # no other page of this parity has body lines
+        margin = _most_common(Counter(float(round(line.x0)) for line in body))
+    return margin, max(line.x1 for line in body)
 
 
 def _is_drop_cap(line: _Line, following: _Line | None, layout: _Layout) -> bool:

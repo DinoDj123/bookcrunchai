@@ -173,6 +173,18 @@ def test_first_line_indent_starts_a_paragraph(tmp_path: Path) -> None:
     assert texts(doc)[1] == " ".join(filler(2, "b"))
 
 
+def test_page_of_only_indented_one_line_paragraphs_keeps_every_paragraph(tmp_path: Path) -> None:
+    normal = column(filler(3, "a"), filler(2, "b"), filler(4, "c"))
+    only_indented = [
+        (f"s{i} a short indented paragraph of one line only", INDENT, TOP + i * STEP, BODY)
+        for i in range(4)
+    ]
+    pages = [normal, normal, normal, only_indented, normal, normal]
+    doc = read_pdf(make_pdf(tmp_path, pages))
+    on_page_four = [t for b, t in zip(doc.blocks, texts(doc), strict=True) if b.page == 4]
+    assert [t.split()[0] for t in on_page_four] == ["s0", "s1", "s2", "s3"]
+
+
 def test_vertical_gap_starts_a_paragraph(tmp_path: Path) -> None:
     first = column(filler(3, "a"))
     second = column(filler(3, "b"), top=TOP + 5 * STEP, indent=False)

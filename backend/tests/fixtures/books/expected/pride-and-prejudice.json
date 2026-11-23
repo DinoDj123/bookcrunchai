@@ -1,0 +1,387 @@
+{
+  "title": "Pride and Prejudice",
+  "author": "Jane Austen",
+  "language": "en",
+  "file_format": "epub",
+  "chapters_detected": true,
+  "chapters": [
+    {
+      "position": 1,
+      "kind": "front_matter",
+      "title": "Front matter",
+      "word_count": 72
+    },
+    {
+      "position": 2,
+      "kind": "front_matter",
+      "title": "PREFACE",
+      "word_count": 4291
+    },
+    {
+      "position": 3,
+      "kind": "chapter",
+      "title": "Chapter I",
+      "word_count": 847
+    },
+    {
+      "position": 4,
+      "kind": "chapter",
+      "title": "CHAPTER II",
+      "word_count": 797
+    },
+    {
+      "position": 5,
+      "kind": "chapter",
+      "title": "CHAPTER III",
+      "word_count": 1698
+    },
+    {
+      "position": 6,
+      "kind": "chapter",
+      "title": "CHAPTER IV",
+      "word_count": 1060
+    },
+    {
+      "position": 7,
+      "kind": "chapter",
+      "title": "CHAPTER V",
+      "word_count": 952
+    },
+    {
+      "position": 8,
+      "kind": "chapter",
+      "title": "CHAPTER VI",
+      "word_count": 2340
+    },
+    {
+      "position": 9,
+      "kind": "chapter",
+      "title": "CHAPTER VII",
+      "word_count": 1984
+    },
+    {
+      "position": 10,
+      "kind": "chapter",
+      "title": "CHAPTER VIII",
+      "word_count": 1925
+    },
+    {
+      "position": 11,
+      "kind": "chapter",
+      "title": "CHAPTER IX",
+      "word_count": 1727
+    },
+    {
+      "position": 12,
+      "kind": "chapter",
+      "title": "CHAPTER X",
+      "word_count": 2206
+    },
+    {
+      "position": 13,
+      "kind": "chapter",
+      "title": "CHAPTER XI",
+      "word_count": 1595
+    },
+    {
+      "position": 14,
+      "kind": "chapter",
+      "title": "CHAPTER XII",
+      "word_count": 673
+    },
+    {
+      "position": 15,
+      "kind": "chapter",
+      "title": "CHAPTER XIII",
+      "word_count": 1687
+    },
+    {
+      "position": 16,
+      "kind": "chapter",
+      "title": "CHAPTER XIV",
+      "word_count": 1115
+    },
+    {
+      "position": 17,
+      "kind": "chapter",
+      "title": "CHAPTER XV",
+      "word_count": 1688
+    },
+    {
+      "position": 18,
+      "kind": "chapter",
+      "title": "CHAPTER XVI",
+      "word_count": 3360
+    },
+    {
+      "position": 19,
+      "kind": "chapter",
+      "title": "CHAPTER XVII",
+      "word_count": 1274
+    },
+    {
+      "position": 20,
+      "kind": "chapter",
+      "title": "CHAPTER XVIII",
+      "word_count": 5167
+    },
+    {
+      "position": 21,
+      "kind": "chapter",
+      "title": "CHAPTER XIX",
+      "word_count": 1909
+    },
+    {
+      "position": 22,
+      "kind": "chapter",
+      "title": "CHAPTER XX",
+      "word_count": 1643
+    },
+    {
+      "position": 23,
+      "kind": "chapter",
+      "title": "CHAPTER XXI",
+      "word_count": 1998
+    },
+    {
+      "position": 24,
+      "kind": "chapter",
+      "title": "CHAPTER XXII",
+      "word_count": 1730
+    },
+    {
+      "position": 25,
+      "kind": "chapter",
+      "title": "CHAPTER XXIII",
+      "word_count": 1609
+    },
+    {
+      "position": 26,
+      "kind": "chapter",
+      "title": "CHAPTER XXIV",
+      "word_count": 1926
+    },
+    {
+      "position": 27,
+      "kind": "chapter",
+      "title": "CHAPTER XXV",
+      "word_count": 1514
+    },
+    {
+      "position": 28,
+      "kind": "chapter",
+      "title": "CHAPTER XXVI",
+      "word_count": 2328
+    },
+    {
+      "position": 29,
+      "kind": "chapter",
+      "title": "CHAPTER XXVII",
+      "word_count": 1254
+    },
+    {
+      "position": 30,
+      "kind": "chapter",
+      "title": "CHAPTER XXVIII",
+      "word_count": 1448
+    },
+    {
+      "position": 31,
+      "kind": "chapter",
+      "title": "CHAPTER XXIX",
+      "word_count": 2380
+    },
+    {
+      "position": 32,
+      "kind": "chapter",
+      "title": "CHAPTER XXX",
+      "word_count": 1229
+    },
+    {
+      "position": 33,
+      "kind": "chapter",
+      "title": "CHAPTER XXXI",
+      "word_count": 1552
+    },
+    {
+      "position": 34,
+      "kind": "chapter",
+      "title": "CHAPTER XXXII",
+      "word_count": 1492
+    },
+    {
+      "position": 35,
+      "kind": "chapter",
+      "title": "CHAPTER XXXIII",
+      "word_count": 1854
+    },
+    {
+      "position": 36,
+      "kind": "chapter",
+      "title": "CHAPTER XXXIV",
+      "word_count": 2097
+    },
+    {
+      "position": 37,
+      "kind": "chapter",
+      "title": "CHAPTER XXXV",
+      "word_count": 2993
+    },
+    {
+      "position": 38,
+      "kind": "chapter",
+      "title": "CHAPTER XXXVI",
+      "word_count": 1997
+    },
+    {
+      "position": 39,
+      "kind": "chapter",
+      "title": "CHAPTER XXXVII",
+      "word_count": 1368
+    },
+    {
+      "position": 40,
+      "kind": "chapter",
+      "title": "CHAPTER XXXVIII",
+      "word_count": 1037
+    },
+    {
+      "position": 41,
+      "kind": "chapter",
+      "title": "CHAPTER XXXIX",
+      "word_count": 1628
+    },
+    {
+      "position": 42,
+      "kind": "chapter",
+      "title": "CHAPTER XL",
+      "word_count": 1676
+    },
+    {
+      "position": 43,
+      "kind": "chapter",
+      "title": "CHAPTER XLI",
+      "word_count": 2263
+    },
+    {
+      "position": 44,
+      "kind": "chapter",
+      "title": "CHAPTER XLII",
+      "word_count": 1823
+    },
+    {
+      "position": 45,
+      "kind": "chapter",
+      "title": "CHAPTER XLIII",
+      "word_count": 4844
+    },
+    {
+      "position": 46,
+      "kind": "chapter",
+      "title": "CHAPTER XLIV",
+      "word_count": 2332
+    },
+    {
+      "position": 47,
+      "kind": "chapter",
+      "title": "CHAPTER XLV",
+      "word_count": 1728
+    },
+    {
+      "position": 48,
+      "kind": "chapter",
+      "title": "Chapter XLVI",
+      "word_count": 3009
+    },
+    {
+      "position": 49,
+      "kind": "chapter",
+      "title": "CHAPTER XLVII",
+      "word_count": 4074
+    },
+    {
+      "position": 50,
+      "kind": "chapter",
+      "title": "CHAPTER XLVIII",
+      "word_count": 2250
+    },
+    {
+      "position": 51,
+      "kind": "chapter",
+      "title": "CHAPTER XLIX",
+      "word_count": 2237
+    },
+    {
+      "position": 52,
+      "kind": "chapter",
+      "title": "CHAPTER L",
+      "word_count": 2198
+    },
+    {
+      "position": 53,
+      "kind": "chapter",
+      "title": "CHAPTER LI",
+      "word_count": 2068
+    },
+    {
+      "position": 54,
+      "kind": "chapter",
+      "title": "CHAPTER LII",
+      "word_count": 3024
+    },
+    {
+      "position": 55,
+      "kind": "chapter",
+      "title": "CHAPTER LIII",
+      "word_count": 2933
+    },
+    {
+      "position": 56,
+      "kind": "chapter",
+      "title": "CHAPTER LIV",
+      "word_count": 1592
+    },
+    {
+      "position": 57,
+      "kind": "chapter",
+      "title": "CHAPTER LV",
+      "word_count": 2324
+    },
+    {
+      "position": 58,
+      "kind": "chapter",
+      "title": "CHAPTER LVI",
+      "word_count": 2722
+    },
+    {
+      "position": 59,
+      "kind": "chapter",
+      "title": "CHAPTER LVII",
+      "word_count": 1650
+    },
+    {
+      "position": 60,
+      "kind": "chapter",
+      "title": "CHAPTER LVIII",
+      "word_count": 2431
+    },
+    {
+      "position": 61,
+      "kind": "chapter",
+      "title": "CHAPTER LIX",
+      "word_count": 2468
+    },
+    {
+      "position": 62,
+      "kind": "chapter",
+      "title": "CHAPTER LX",
+      "word_count": 1584
+    },
+    {
+      "position": 63,
+      "kind": "chapter",
+      "title": "CHAPTER LXI",
+      "word_count": 1246
+    }
+  ]
+}

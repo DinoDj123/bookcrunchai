@@ -17,7 +17,10 @@ dependencies = [
     "pyjwt>=2.10,<3",  # session token (section 7.3)
     "python-multipart>=0.0.12",  # file uploads in FastAPI (FR-002)
     "email-validator>=2.2",  # EmailStr in request schemas
-    # Parsing libraries (EbookLib, BeautifulSoup, PyMuPDF) are added by Track A with the real parser.
+    # Parsing (Track A). EPUB is read with zipfile + BeautifulSoup/lxml, no EbookLib (Decision D1).
+    "beautifulsoup4>=4.12",  # EPUB XHTML (FR-003)
+    "lxml>=5.2",  # parser backend for BeautifulSoup
+    "pymupdf>=1.24",  # PDF text and layout (FR-003), used from A3
 ]
 
 [project.optional-dependencies]

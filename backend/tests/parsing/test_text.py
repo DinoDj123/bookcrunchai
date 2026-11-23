@@ -6,6 +6,7 @@ from app.parsing.text import (
     cut_at_word,
     join_hyphenated,
     language_code,
+    starts_with_footnote_marker,
     strip_footnote_markers,
 )
 
@@ -32,6 +33,10 @@ def test_join_hyphenated(raw: str, expected: str) -> None:
         ("Rome[*] fell", "Rome fell"),
         ("as said [12].", "as said."),
         ("note[a] here", "note here"),
+        (
+            "Louis[*] (and not of Charles[+]) and Acuto,[%] then",
+            "Louis (and not of Charles) and Acuto, then",
+        ),
         ("[*]", ""),
         ("arrays [i, j] stay", "arrays [i, j] stay"),
         ("no markers", "no markers"),
@@ -39,6 +44,22 @@ def test_join_hyphenated(raw: str, expected: str) -> None:
 )
 def test_strip_footnote_markers(raw: str, expected: str) -> None:
     assert strip_footnote_markers(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("[*] Duke Lodovico was Lodovico Moro.", True),
+        ("[+] Louis XI, son of the above.", True),
+        ("[12] See the introduction.", True),
+        ("* A note.", True),
+        ("[a] first item", False),
+        ("Rome[*] fell", False),
+        ("Plain text.", False),
+    ],
+)
+def test_starts_with_footnote_marker(text: str, expected: bool) -> None:
+    assert starts_with_footnote_marker(text) is expected
 
 
 @pytest.mark.parametrize(

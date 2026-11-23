@@ -8,7 +8,7 @@ from app.parsing.contract import FileFormat, ParseError, ParseErrorCode
 from app.parsing.document import Block, RawDocument, TocEntry
 from app.parsing.pdf import read_pdf
 
-from .builders import PdfLine, make_pdf
+from .builders import PDF_PAGE_WIDTH, PdfLine, make_pdf
 
 BOOKS = Path(__file__).parent.parent / "fixtures" / "books"
 
@@ -18,6 +18,7 @@ MARGIN = 50.0
 INDENT = 62.0
 STEP = 12.0
 TOP = 100.0
+PDF_CENTRE = PDF_PAGE_WIDTH / 2
 
 
 def filler(n: int, tag: str = "w") -> list[str]:
@@ -148,6 +149,33 @@ def test_body_text_in_margin_zone_is_kept_when_not_repeated(tmp_path: Path) -> N
     pages[1].append(("A closing line that sits low on the page.", MARGIN, 560.0, BODY))
     doc = read_pdf(make_pdf(tmp_path, pages))
     assert any("A closing line that sits low on the page." in t for t in texts(doc))
+
+
+def test_lone_roman_numeral_at_page_top_is_kept_as_chapter_label(tmp_path: Path) -> None:
+    pages = [column(filler(3, f"p{n}x"), ["The end."]) for n in range(1, 6)]
+    pages[1].append(("I", MARGIN, 40.0, BODY))
+    doc = read_pdf(make_pdf(tmp_path, pages, footer_numbers=True))
+    assert "I" in texts(doc)
+    assert not any(t.isdigit() for t in texts(doc))
+
+
+def test_roman_page_numbers_in_bottom_zone_are_removed(tmp_path: Path) -> None:
+    numerals = ["i", "ii", "iii", "iv", "v"]
+    pages = [
+        [*column(filler(4, f"p{n}x")), (numerals[n - 1], PDF_CENTRE, 570.0, 9.0)]
+        for n in range(1, 6)
+    ]
+    doc = read_pdf(make_pdf(tmp_path, pages))
+    assert len(doc.blocks) == 5
+    assert not any(t in numerals for t in texts(doc))
+
+
+def test_roman_numeral_is_kept_when_the_numbers_are_in_the_other_zone(tmp_path: Path) -> None:
+    # Arabic page numbers at the bottom (3+ pages) do not make a top-zone "I" a page number.
+    pages = [column(filler(3, f"p{n}x"), ["The end."]) for n in range(1, 6)]
+    pages[2].append(("I", MARGIN, 40.0, BODY))
+    doc = read_pdf(make_pdf(tmp_path, pages, footer_numbers=True))
+    assert "I" in texts(doc)
 
 
 # --------------------------------------------------------------------------- hyphens and paragraphs

@@ -26,7 +26,7 @@ cookie needs no cross-site configuration.
 | `backend/app/core/` | Settings and the common error format |
 | `backend/app/db/` | SQLAlchemy base and sessions |
 | `backend/app/worker/` | ARQ worker and pipeline tasks |
-| `backend/app/parsing/` | `parse_book()` and the shared contract |
+| `backend/app/parsing/` | `parse_book()`: EPUB and PDF readers, chapter detection, and the shared contract |
 | `backend/migrations/` | Alembic migrations |
 | `frontend/` | Next.js (App Router), TypeScript, Tailwind CSS |
 
@@ -81,8 +81,9 @@ pytest                                   # includes tests/parsing/test_contract.
 npm run lint && npm run format:check && npm run typecheck && npm run build
 ```
 
-Automated tests never call paid APIs (Claude, Voyage); they use fakes. `BOOKCRUNCH_PARSER=fake`
-selects the fake parser until the real one is merged.
+Automated tests never call paid APIs (Claude, Voyage); they use fakes. The API and worker tests
+set `BOOKCRUNCH_PARSER=fake`, so they do not depend on the real parser; the parser has its own
+tests in `tests/parsing`, which run on the three test books in `tests/fixtures/books`.
 
 Database tests (`tests/db`) run only when `TEST_DATABASE_URL` is set; they drop and recreate the
 schema, so point it at a separate database, never the development one:
@@ -131,6 +132,55 @@ writes status, chapters and errors back. PostgreSQL is the only place where job 
   is started again only when ARQ's lock on it expires, about 10 minutes later.
 - With `BOOKCRUNCH_PARSER=fake`, set `FAKE_PARSER_DELAY=3` or `FAKE_PARSER_ERROR=NO_TEXT_LAYER` on
   the worker to see a slow or a failing job (`docs/contracts/parse_book.md`, section 6).
+
+## Parsing
+
+`parse_book()` (`backend/app/parsing/`) turns a stored EPUB or text-based PDF into a `ParsedBook`:
+title, author, language and an ordered list of entries (front matter, chapters, back matter), each
+with its paragraphs. The format is detected by file signature, not by extension. EPUB files are
+read with `zipfile` and BeautifulSoup, PDF files with PyMuPDF. Chapters come from the table of
+contents of the file (EPUB navigation, PDF outline), otherwise from heading patterns such as
+"Chapter 7" or "Glava 3"; when nothing is found the book is split into parts of about 5,000 words.
+The rules are in [`docs/contracts/parse_book.md`](docs/contracts/parse_book.md), the design in
+[`docs/superpowers/specs/2026-11-23-parser-design.md`](docs/superpowers/specs/2026-11-23-parser-design.md).
+
+`BOOKCRUNCH_PARSER=real` (the default) uses this parser; `fake` returns a small fixed book and is
+meant for tests and for working on the API or the UI.
+
+Result of uploading the three test books through the API and the worker (23.11.2026):
+
+| Book | Format | Chapters | Front matter | Back matter | Words |
+|---|---|---|---|---|---|
+| Pride and Prejudice | EPUB | 61 | 2 | 0 | 125,920 |
+| The Prince | PDF | 26 | 3 | 2 | 47,574 |
+| Meditations | EPUB | 12 | 2 | 3 | 71,819 |
+
+### Known limitations
+
+- Scanned PDFs (pictures of pages without text) are not supported; there is no OCR. The job fails
+  with `NO_TEXT_LAYER`.
+- PDFs with several columns per page may be read in the wrong order.
+- Poetry line breaks are lost: a poem may come out as one paragraph (or one paragraph per indented
+  line in PDFs).
+- A hyphen at the end of a line, followed by a lower-case letter, is treated as a word break and
+  removed ("well-" + "known" becomes "wellknown").
+- Footnotes are dropped, so they are not part of the summary or the answers.
+- In PDFs, paragraphs without an indent or blank space between them can be merged into one.
+- Tables are turned into plain text.
+- PDFs without a chapter outline are split by heading patterns and font size, so chapters may be
+  wrong or fall back to "Part N".
+- When the table of contents has parts with named chapters under them ("Part I" with "The Storm",
+  "The Calm"), each part can become one long entry.
+- An unnumbered section after the last numbered chapter, such as "Conclusion", is marked as back
+  matter.
+- The printed table of contents is detected heuristically: an unusual one may remain in the text,
+  and a list of short lines that end with numbers (a chronology) may be dropped with it.
+- A "Prologue" or "Epilogue" that is not in the book's table of contents does not start its own
+  section.
+- A damaged PDF that PyMuPDF can repair is parsed without an error, possibly with pages missing.
+- The language is taken from the file's metadata; PDFs often have none, and then it is unknown.
+- A file without a title in its metadata gets its title from the file name, not from the text of
+  the book.
 
 ## Deployment
 

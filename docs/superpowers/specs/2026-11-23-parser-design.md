@@ -307,6 +307,9 @@ files that are not well-formed. Page-number spans (`x-ebookmaker-pageno`) contai
 - PDF paragraphs without a first-line indent or a vertical gap between them are merged into one
   (the-prince.pdf pp. 188–190).
 - Tables are flattened to text.
+- A lone roman numeral at the top or bottom of a PDF page (e.g. a chapter label "I") is still
+  removed when the book has number-only page numbers (arabic or roman) in the same zone on at
+  least `MIN_REPEAT_PAGES` pages.
 - The printed table of contents is found heuristically; an unusual one may stay in the text.
 - A "Prologue" / "Epilogue" heading that is not in the TOC does not start a new entry.
 - Meditations: the small heading block "HIS FIRST BOOK" is a separate `front_matter` entry.

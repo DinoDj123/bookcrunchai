@@ -13,6 +13,7 @@ from app.parsing.chapters import (
     FRONT_KEYWORDS,
     build_chapters,
     classify_kind,
+    space_after_label,
 )
 from app.parsing.contract import (
     Chapter,
@@ -266,8 +267,43 @@ def test_pattern_detection_without_toc(heading_texts: list[str]) -> None:
         blocks += [head(text), para()]
     chapters, detected = check(doc(blocks))
     assert detected
-    assert [c.title for c in chapters] == [t.rstrip(".") for t in heading_texts]
+    expected = [space_after_label(t.rstrip(".")) for t in heading_texts]
+    assert [c.title for c in chapters] == expected
     assert all(c.kind is C for c in chapters)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("CHAPTERXXVII", "CHAPTER XXVII"),
+        ("CHAPTERXXVIII", "CHAPTER XXVIII"),
+        ("Chapter12", "Chapter 12"),
+        ("BookII", "Book II"),
+        ("Glava3", "Glava 3"),
+        ("Chapter XII", "Chapter XII"),
+        ("Chapter 7. The Ball", "Chapter 7. The Ball"),
+        ("Partition", "Partition"),
+        ("Booking", "Booking"),
+        ("Chapterhouse", "Chapterhouse"),
+        ("Parti", "Parti"),
+        ("Diocese", "Diocese"),
+        ("Bookmark", "Bookmark"),
+    ],
+)
+def test_space_is_inserted_between_label_and_number(raw: str, expected: str) -> None:
+    assert space_after_label(raw) == expected
+
+
+def test_glued_label_in_toc_title_is_spaced() -> None:
+    blocks = [
+        head("CHAPTERXXVII.", 2, None, "a.xhtml#c1"),
+        para(),
+        head("Chapter 2", 2, None, "a.xhtml#c2"),
+        para(),
+    ]
+    toc = [TocEntry("CHAPTERXXVII.", 1, "a.xhtml#c1"), TocEntry("Chapter 2", 1, "a.xhtml#c2")]
+    chapters, _ = check(doc(blocks, toc))
+    assert [c.title for c in chapters] == ["CHAPTER XXVII", "Chapter 2"]
 
 
 def test_pattern_regex_rejects_ordinary_headings() -> None:

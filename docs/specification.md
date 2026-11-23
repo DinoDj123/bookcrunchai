@@ -1,8 +1,8 @@
-# bookcrunch.ai — Software Specification v1.4 (Markdown copy)
+# bookcrunch.ai — Software Specification v1.5 (Markdown copy)
 
 Team Bookcrunch.ai · Daris Velović, Dino Đerekerac · Mentors: Ana Pješivac, Tamara Pavlović · 21.11.2026
 
-> This is a text copy of `bookcrunch_software_specification_v1.4.docx` so that Claude Code can read it.
+> This is a text copy of `bookcrunch_software_specification_v1.5.docx` so that Claude Code can read it.
 > The Word document is the official version sent to the mentors; diagrams and wireframes are only there.
 > When the Word document changes, regenerate this file.
 
@@ -745,7 +745,7 @@ An uploaded book or a demo book.
 |-------------------|--------------|--------------------------------|--------------------------------------------|
 | id                | UUID         | PK                             | Unique identifier                          |
 | owner_id          | UUID         | FK → users.id, NOT NULL        | Uploading user (seed user for demo books)  |
-| title             | VARCHAR(500) | NOT NULL                       | From metadata, or the file name if missing |
+| title             | VARCHAR(500) | NOT NULL                       | From metadata, or the uploaded file name if missing |
 | author            | VARCHAR(300) | NULL                           | From metadata                              |
 | source_language   | VARCHAR(8)   | NULL                           | Detected language of the book              |
 | file_format       | VARCHAR(4)   | NOT NULL, epub \| pdf          | Format of the uploaded file                |
@@ -1298,6 +1298,7 @@ Both members are full-stack developers. Work is split into two tracks that touch
 | 1.2 | 21.11.2026 | Daris Velović | Same-book rules enforced by the database: book_id and composite foreign keys on chapter_summaries, key_ideas and citations; CHECK that emails are stored in lower case; new rule that a citation references a chunk of the question’s book (6.3) |
 | 1.3 | 21.11.2026 | Daris Velović | Job queue implemented: parser failures fail a job at once, other errors are retried up to 3 attempts (Appendix C); decisions on job retries and job results (Appendix D) |
 | 1.4 | 21.11.2026 | Daris Velović | Authentication, upload and job status implemented: register response and EMAIL_TAKEN, cookie name and Secure rule (7.3); 503 QUEUE_UNAVAILABLE on upload (7.1, 7.2); books.file_path is relative to the storage directory (6.2); decisions on upload without a queue and on the login answer (Appendix D) |
+| 1.5 | 23.11.2026 | Daris Velović, Dino Đerekerac | parse_book contract 1.1: a book without a metadata title keeps the uploaded file name as its title (6.2); decision on the book title (Appendix D) |
 
 # Appendices
 
@@ -1394,6 +1395,7 @@ Significant decisions and the alternatives that were rejected.
 | Job results | Kept only in PostgreSQL; ARQ stores no result in Redis (keep_result = 0) and the ARQ job ID is the job’s UUID | Keeping ARQ results: a second copy of the status, and a kept result blocks queuing the same job ID again, which retrying a failed job needs. |
 | Upload when the queue is down | The book, its job and the stored file are removed and the API answers 503 QUEUE_UNAVAILABLE; the user uploads again | Keeping the book with a job nobody will run: it would stay “uploaded” forever, and uploading the file again would only return that stuck book (FR-014). Enqueuing before the database commit: the worker could look for a job that is not saved yet. |
 | Login answer | The same 401 INVALID_CREDENTIALS for an unknown email and a wrong password, and a password hash is checked in both cases | Separate messages or a faster answer for unknown emails: would reveal which addresses have an account. |
+| Book title without metadata | The parser reports `title_from_metadata = False` and the worker keeps the title set at upload (the cleaned original file name) | Parser falls back to the stored file name: files are stored as `<uuid>.<ext>`, so the title would be a UUID. Passing the original file name to `parse_book()`: changes the function's signature (contract 2.0) for a value the database already has. |
 
 ## E. Open Questions for the Mentor
 

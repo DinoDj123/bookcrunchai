@@ -1,7 +1,9 @@
 """process_book, success path: the parsed book is stored as the parse_book contract (section 5)
 prescribes. Needs TEST_DATABASE_URL (see tests/conftest.py)."""
 
+import dataclasses
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -9,6 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Book, Chapter, Job
+from app.parsing import ParsedBook
+from app.parsing.fake import fake_parse_book
+from app.worker import tasks
 from app.worker.tasks import process_book
 from tests.worker.conftest import make_job
 
@@ -46,6 +51,31 @@ async def test_success_marks_job_done_and_book_ready(
     assert book.chapters_detected is True
     chapters = await chapters_of(session, book)
     assert book.word_count == sum(chapter.word_count for chapter in chapters)
+
+
+async def test_book_without_metadata_title_keeps_the_upload_title(
+    ctx: dict[str, Any],
+    session: AsyncSession,
+    book: Book,
+    queued_job: Job,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored_name = Path(book.file_path).stem  # what a real parser falls back to
+
+    def parse(file_path: Path) -> ParsedBook:
+        parsed = fake_parse_book(file_path)
+        return dataclasses.replace(parsed, title=stored_name, title_from_metadata=False)
+
+    monkeypatch.setattr(tasks, "get_parse_book", lambda: parse)
+    book.title = "My Uploaded Book"
+    await session.flush()
+
+    await process_book(ctx, str(queued_job.id))
+    await session.refresh(book)
+
+    assert book.status == "ready"
+    assert book.title == "My Uploaded Book"
+    assert book.author == "Fake Author"
 
 
 async def test_success_stores_chapters_in_order(

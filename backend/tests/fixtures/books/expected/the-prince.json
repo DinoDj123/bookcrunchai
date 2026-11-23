@@ -1,0 +1,195 @@
+{
+  "title": "The Prince",
+  "author": "Nicolo Machiavelli",
+  "language": null,
+  "file_format": "pdf",
+  "chapters_detected": true,
+  "chapters": [
+    {
+      "position": 1,
+      "kind": "front_matter",
+      "title": "Front matter",
+      "word_count": 51
+    },
+    {
+      "position": 2,
+      "kind": "front_matter",
+      "title": "INTRODUCTION",
+      "word_count": 3888
+    },
+    {
+      "position": 3,
+      "kind": "front_matter",
+      "title": "DEDICATION",
+      "word_count": 438
+    },
+    {
+      "position": 4,
+      "kind": "chapter",
+      "title": "CHAPTER I. HOW MANY KINDS OF PRINCIPALITIES THERE ARE, AND BY WHAT MEANS THEY ARE ACQUIRED",
+      "word_count": 118
+    },
+    {
+      "position": 5,
+      "kind": "chapter",
+      "title": "CHAPTER II. CONCERNING HEREDITARY PRINCIPALITIES",
+      "word_count": 251
+    },
+    {
+      "position": 6,
+      "kind": "chapter",
+      "title": "CHAPTER III. CONCERNING MIXED PRINCIPALITIES",
+      "word_count": 2986
+    },
+    {
+      "position": 7,
+      "kind": "chapter",
+      "title": "CHAPTER IV. WHY THE KINGDOM OF DARIUS, CONQUERED BY ALEXANDER, DID NOT REBEL AGAINST THE SUCCESSORS OF ALEXANDER AT HIS DEATH",
+      "word_count": 942
+    },
+    {
+      "position": 8,
+      "kind": "chapter",
+      "title": "CHAPTER V. CONCERNING THE WAY TO GOVERN CITIES OR PRINCIPALITIES WHICH LIVED UNDER THEIR OWN LAWS BEFORE THEY WERE ANNEXED",
+      "word_count": 437
+    },
+    {
+      "position": 9,
+      "kind": "chapter",
+      "title": "CHAPTER VI. CONCERNING NEW PRINCIPALITIES WHICH ARE ACQUIRED BY ONE’S OWN ARMS AND ABILITY",
+      "word_count": 1188
+    },
+    {
+      "position": 10,
+      "kind": "chapter",
+      "title": "CHAPTER VII. CONCERNING NEW PRINCIPALITIES WHICH ARE ACQUIRED EITHER BY THE ARMS OF OTHERS OR BY GOOD FORTUNE",
+      "word_count": 2546
+    },
+    {
+      "position": 11,
+      "kind": "chapter",
+      "title": "CHAPTER VIII. CONCERNING THOSE WHO HAVE OBTAINED A PRINCIPALITY BY WICKEDNESS",
+      "word_count": 1505
+    },
+    {
+      "position": 12,
+      "kind": "chapter",
+      "title": "CHAPTER IX. CONCERNING A CIVIL PRINCIPALITY",
+      "word_count": 1269
+    },
+    {
+      "position": 13,
+      "kind": "chapter",
+      "title": "CHAPTER X. CONCERNING THE WAY IN WHICH THE STRENGTH OF ALL PRINCIPALITIES OUGHT TO BE MEASURED",
+      "word_count": 702
+    },
+    {
+      "position": 14,
+      "kind": "chapter",
+      "title": "CHAPTER XI. CONCERNING ECCLESIASTICAL PRINCIPALITIES",
+      "word_count": 866
+    },
+    {
+      "position": 15,
+      "kind": "chapter",
+      "title": "CHAPTER XII. HOW MANY KINDS OF SOLDIERY THERE ARE, AND CONCERNING MERCENARIES",
+      "word_count": 1670
+    },
+    {
+      "position": 16,
+      "kind": "chapter",
+      "title": "CHAPTER XIII. CONCERNING AUXILIARIES, MIXED SOLDIERY, AND ONE’S OWN",
+      "word_count": 1229
+    },
+    {
+      "position": 17,
+      "kind": "chapter",
+      "title": "CHAPTER XIV. THAT WHICH CONCERNS A PRINCE ON THE SUBJECT OF THE ART OF WAR",
+      "word_count": 863
+    },
+    {
+      "position": 18,
+      "kind": "chapter",
+      "title": "CHAPTER XV. CONCERNING THINGS FOR WHICH MEN, AND ESPECIALLY PRINCES, ARE PRAISED OR BLAMED",
+      "word_count": 506
+    },
+    {
+      "position": 19,
+      "kind": "chapter",
+      "title": "CHAPTER XVI. CONCERNING LIBERALITY AND MEANNESS",
+      "word_count": 804
+    },
+    {
+      "position": 20,
+      "kind": "chapter",
+      "title": "CHAPTER XVII. CONCERNING CRUELTY AND CLEMENCY, AND WHETHER IT IS BETTER TO BE LOVED THAN FEARED",
+      "word_count": 1028
+    },
+    {
+      "position": 21,
+      "kind": "chapter",
+      "title": "CHAPTER XVIII. CONCERNING THE WAY IN WHICH PRINCES SHOULD KEEP FAITH",
+      "word_count": 984
+    },
+    {
+      "position": 22,
+      "kind": "chapter",
+      "title": "CHAPTER XIX. THAT ONE SHOULD AVOID BEING DESPISED AND HATED",
+      "word_count": 3527
+    },
+    {
+      "position": 23,
+      "kind": "chapter",
+      "title": "CHAPTER XX. ARE FORTRESSES, AND MANY OTHER THINGS TO WHICH PRINCES OFTEN RESORT, ADVANTAGEOUS OR HURTFUL?",
+      "word_count": 1493
+    },
+    {
+      "position": 24,
+      "kind": "chapter",
+      "title": "CHAPTER XXI. HOW A PRINCE SHOULD CONDUCT HIMSELF SO AS TO GAIN RENOWN",
+      "word_count": 1263
+    },
+    {
+      "position": 25,
+      "kind": "chapter",
+      "title": "CHAPTER XXII. CONCERNING THE SECRETARIES OF PRINCES",
+      "word_count": 451
+    },
+    {
+      "position": 26,
+      "kind": "chapter",
+      "title": "CHAPTER XXIII. HOW FLATTERERS SHOULD BE AVOIDED",
+      "word_count": 693
+    },
+    {
+      "position": 27,
+      "kind": "chapter",
+      "title": "CHAPTER XXIV. WHY THE PRINCES OF ITALY HAVE LOST THEIR STATES",
+      "word_count": 524
+    },
+    {
+      "position": 28,
+      "kind": "chapter",
+      "title": "CHAPTER XXV. WHAT FORTUNE CAN EFFECT IN HUMAN AFFAIRS AND HOW TO WITHSTAND HER",
+      "word_count": 1141
+    },
+    {
+      "position": 29,
+      "kind": "chapter",
+      "title": "CHAPTER XXVI. AN EXHORTATION TO LIBERATE ITALY FROM THE BARBARIANS",
+      "word_count": 1365
+    },
+    {
+      "position": 30,
+      "kind": "back_matter",
+      "title": "DESCRIPTION OF THE METHODS ADOPTED BY THE DUKE VALENTINO WHEN MURDERING VITELLOZZO VITELLI, OLIVEROTTO DA FERMO, THE SIGNOR PAGOLO, AND THE DUKE DI GRAVINA ORSINI",
+      "word_count": 2446
+    },
+    {
+      "position": 31,
+      "kind": "back_matter",
+      "title": "THE LIFE OF CASTRUCCIO CASTRACANI OF LUCCA",
+      "word_count": 10400
+    }
+  ]
+}

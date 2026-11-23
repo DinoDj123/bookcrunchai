@@ -248,9 +248,27 @@ def _margin_key(text: str) -> str:
     return _DIGIT.sub("#", normalize_text(text).lower())
 
 
-def _is_page_number(text: str) -> bool:
+def _is_arabic_number(text: str) -> bool:
+    return bool(_ARABIC_NUMBER.fullmatch(normalize_text(text)))
+
+
+def _is_roman_number(text: str) -> bool:
     text = normalize_text(text)
-    return bool(_ARABIC_NUMBER.fullmatch(text) or (text and _ROMAN_NUMBER.fullmatch(text)))
+    return bool(text and _ROMAN_NUMBER.fullmatch(text))
+
+
+def _is_page_number(text: str) -> bool:
+    return _is_arabic_number(text) or _is_roman_number(text)
+
+
+def _zone(line: _Line, page: _Page) -> str | None:
+    """Return "top" or "bottom" for a line in a margin zone, else None."""
+    centre = (line.y0 + line.y1) / 2
+    if centre < page.height * HEADER_ZONE:
+        return "top"
+    if centre > page.height * (1 - HEADER_ZONE):
+        return "bottom"
+    return None
 
 
 def _remove_running_lines(pages: list[_Page], layout: _Layout) -> list[_Page]:
@@ -267,10 +285,25 @@ def _remove_running_lines(pages: list[_Page], layout: _Layout) -> list[_Page]:
     min_pages = max(MIN_REPEAT_PAGES, REPEAT_RATIO * len(pages))
     repeated = {key for key, numbers in pages_with_key.items() if len(numbers) >= min_pages}
 
+    # A lone roman numeral ("I", "V") is a page number only where number-only lines occur on
+    # enough pages in the same zone; a single one is more likely a chapter label.
+    number_pages: dict[str, set[int]] = {"top": set(), "bottom": set()}
+    for page in pages:
+        for line in page.lines:
+            zone = _zone(line, page)
+            if zone is not None and is_candidate(line, page) and _is_page_number(line.text):
+                number_pages[zone].add(page.number)
+    roman_zones = {z for z, numbers in number_pages.items() if len(numbers) >= MIN_REPEAT_PAGES}
+
+    def is_page_number(line: _Line, page: _Page) -> bool:
+        if _is_arabic_number(line.text):
+            return True
+        return _is_roman_number(line.text) and _zone(line, page) in roman_zones
+
     def is_running(line: _Line, page: _Page) -> bool:
         if not is_candidate(line, page):
             return False
-        return _margin_key(line.text) in repeated or _is_page_number(line.text)
+        return _margin_key(line.text) in repeated or is_page_number(line, page)
 
     return _drop_lines(pages, is_running)
 

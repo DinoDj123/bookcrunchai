@@ -204,13 +204,23 @@ class _Boundary:
     forced_kind: ChapterKind | None = None
 
 
+# "CHAPTERXXVII" -> "CHAPTER XXVII". The number is arabic or an upper-case roman numeral, so words
+# such as "Partition", "Booking", "Chapterhouse" or "Parti" stay untouched.
+_GLUED_LABEL = re.compile(rf"^((?i:{_LABELS}))(?=(?:[0-9]+|[IVXLCDM]+)\b)")
+
+
+def space_after_label(title: str) -> str:
+    """Insert the missing space between a chapter label and its number (original case kept)."""
+    return _GLUED_LABEL.sub(r"\1 ", title)
+
+
 def _block_title(block: Block, label: str | None) -> str | None:
     """R1: a heading block names its own entry; otherwise the TOC label does."""
-    if block.heading_level is not None:
-        title = clean_title(block.text)
-        if title is not None:
-            return title
-    return clean_title(label) if label is not None else None
+    raw = block.text if block.heading_level is not None else None
+    title = clean_title(raw) if raw is not None else None
+    if title is None and label is not None:
+        title = clean_title(label)
+    return space_after_label(title) if title is not None else None
 
 
 def _resolve_toc_target(

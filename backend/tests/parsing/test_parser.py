@@ -119,8 +119,8 @@ def test_real_pdf_smoke() -> None:
     validate_parsed_book(book)
     assert (book.title, book.author, book.language) == ("The Prince", "Nicolo Machiavelli", None)
     assert book.file_format is FileFormat.PDF
-    assert book.chapters_detected is False
-    assert book.chapters[0].title == "Part 1"
+    assert book.chapters_detected is True
+    assert sum(c.kind.value == "chapter" for c in book.chapters) == 26
     pages = [p.page for c in book.chapters for p in c.paragraphs]
     assert pages[0] == 1 and pages == sorted(pages)  # type: ignore[type-var]
     assert book.to_dict() == parse_book(BOOKS / "the-prince.pdf").to_dict()

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pymupdf
 
+from .boilerplate import is_publisher_promo
 from .contract import FileFormat, ParseError, ParseErrorCode, count_words, normalize_text
 from .document import Block, RawDocument, TocEntry
 from .text import join_hyphenated, starts_with_footnote_marker, strip_footnote_markers
@@ -300,7 +301,7 @@ def _build_blocks(pages: list[_Page], layout: _Layout) -> list[Block]:
         if paragraph.heading_size is None and starts_with_footnote_marker(raw):
             continue  # footnote text (dropped in the MVP)
         text = normalize_text(strip_footnote_markers(join_hyphenated(raw)))
-        if text:
+        if text and not is_publisher_promo(text):
             blocks.append(Block(text, paragraph.page, _heading_level(paragraph, text, top_size)))
     return blocks
 

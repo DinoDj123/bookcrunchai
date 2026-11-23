@@ -398,3 +398,8 @@ def test_prince_pages_non_decreasing(prince: tuple[RawDocument, float]) -> None:
     pages = [b.page for b in prince[0].blocks]
     assert all(isinstance(p, int) for p in pages)
     assert pages == sorted(pages)  # type: ignore[type-var]
+
+
+def test_prince_has_no_publisher_promo(prince: tuple[RawDocument, float]) -> None:
+    for text in texts(prince[0]):
+        assert "planet ebook" not in text.lower()

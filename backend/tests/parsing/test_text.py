@@ -1,6 +1,6 @@
 import pytest
 
-from app.parsing.boilerplate import is_gutenberg_end, is_gutenberg_start
+from app.parsing.boilerplate import is_gutenberg_end, is_gutenberg_start, is_publisher_promo
 from app.parsing.text import (
     clean_title,
     cut_at_word,
@@ -112,3 +112,28 @@ def test_gutenberg_markers() -> None:
     assert is_gutenberg_end("*** end of the project gutenberg ebook meditations ***")
     assert not is_gutenberg_start("Project Gutenberg is a library")
     assert not is_gutenberg_end("*** START OF THE PROJECT GUTENBERG EBOOK")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Download free eBooks of classic literature, books and novels at Planet eBook. "
+        "Subscribe to our free eBooks blog and email newsletter.",
+        "Free eBooks at Planet eBook.com",
+        "DOWNLOAD FREE EBOOKS OF CLASSIC LITERATURE AT PLANET EBOOK",
+    ],
+)
+def test_publisher_promo_detected(text: str) -> None:
+    assert is_publisher_promo(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The planet was a book of free ebooks.",
+        "Subscribe to our newsletter.",
+        "He read classic literature all day.",
+    ],
+)
+def test_ordinary_text_is_not_publisher_promo(text: str) -> None:
+    assert not is_publisher_promo(text)

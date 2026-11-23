@@ -78,7 +78,14 @@ DROP_KEYWORDS = (
     "list of illustrations",
     "illustrations",
     "sadržaj",
+    # An index of the first lines of paragraphs (Meditations, after GLOSSARY) repeats the book's
+    # text; kept, it would be summarised and retrieved as if it were content.
+    "paragraphs with first lines",
+    "index of first lines",
 )
+# The author's main text (contract §3, Kinds): always kind `chapter`, never moved to front or
+# back matter by the position rules.
+ALWAYS_CHAPTER_KEYWORDS = ("prologue", "epilogue", "prolog", "epilog")
 
 
 def _keyword_regex(words: Sequence[str]) -> re.Pattern[str]:
@@ -87,6 +94,7 @@ def _keyword_regex(words: Sequence[str]) -> re.Pattern[str]:
 
 _FRONT_RE = _keyword_regex(FRONT_KEYWORDS)
 _BACK_RE = _keyword_regex(BACK_KEYWORDS)
+_ALWAYS_CHAPTER_RE = _keyword_regex(ALWAYS_CHAPTER_KEYWORDS)
 # Drop keywords must equal the whole title: "Contents of the Will" is a real chapter.
 _DROP_TITLES = frozenset(DROP_KEYWORDS)
 
@@ -177,6 +185,11 @@ def classify_kind(title: str) -> ChapterKind | None:
     if _BACK_RE.match(text):
         return ChapterKind.BACK_MATTER
     return ChapterKind.CHAPTER
+
+
+def _is_always_chapter(title: str) -> bool:
+    """Prologue / epilogue (and prolog / epilog) belong to the main text."""
+    return _ALWAYS_CHAPTER_RE.match(_keyword_text(title)) is not None
 
 
 def _matches_pattern(title: str) -> bool:
@@ -370,6 +383,8 @@ def _build_entries(doc: RawDocument, found: list[_Boundary]) -> list[_Entry]:
         block = blocks[boundary.index]
         title = _block_title(block, boundary.label) or "Untitled"
         kind = boundary.forced_kind or classify_kind(title)
+        if kind is not None and _is_always_chapter(title):
+            kind = ChapterKind.CHAPTER
         if kind is None:
             continue  # contents, list of illustrations: dropped
         is_title = block.heading_level is not None and clean_title(block.text) is not None
@@ -387,7 +402,11 @@ def _apply_positions(entries: list[_Entry]) -> None:
     pattern_idx = [i for i, e in enumerate(entries) if e.pattern]
     if len(pattern_idx) >= MIN_PATTERN_FOR_POSITION:  # R3
         for i, entry in enumerate(entries):
-            if entry.kind is ChapterKind.CHAPTER and not entry.pattern:
+            if (
+                entry.kind is ChapterKind.CHAPTER
+                and not entry.pattern
+                and not _is_always_chapter(entry.title)
+            ):
                 if i < pattern_idx[0]:
                     entry.kind = ChapterKind.FRONT_MATTER
                 elif i > pattern_idx[-1]:

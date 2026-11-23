@@ -442,6 +442,71 @@ def test_non_keyword_entries_around_pattern_entries_are_front_and_back() -> None
     ]
 
 
+def test_prologue_and_epilogue_stay_chapters_under_r3() -> None:
+    """Contract §3: prologue and epilogue are the author's main text, whatever their position."""
+    texts = ["Prologue", "THE FIRST BOOK", "THE SECOND BOOK", "THE THIRD BOOK", "Epilogue", "Notes"]
+    blocks: list[Block] = []
+    toc: list[TocEntry] = []
+    for i, text in enumerate(texts):
+        blocks += [head(text, 2, None, f"a#{i}"), para()]
+        toc.append(TocEntry(text, 1, f"a#{i}"))
+    chapters, _ = check(doc(blocks, toc))
+    assert summary(chapters) == [
+        ("Prologue", C),
+        ("THE FIRST BOOK", C),
+        ("THE SECOND BOOK", C),
+        ("THE THIRD BOOK", C),
+        ("Epilogue", C),
+        ("Notes", B),
+    ]
+
+
+@pytest.mark.parametrize(
+    "title", ["EPILOGUE OF THE AUTHOR TO HIS READERS", "EPILOG ZA ČITAOCE IZ 1900"]
+)
+def test_all_caps_epilogue_after_last_toc_chapter_is_a_chapter(title: str) -> None:
+    """D2 would make an all-caps heading after the last TOC chapter back matter; not an epilogue."""
+    blocks = [
+        head("Chapter 1", 2, None, "a#1"),
+        para(),
+        head("Chapter 2", 2, None, "a#2"),
+        para(),
+        head("Chapter 3", 2, None, "a#3"),
+        para(),
+        head(title, 3),
+        para(),
+    ]
+    toc = [TocEntry(f"Chapter {n}", 1, f"a#{n}") for n in (1, 2, 3)]
+    chapters, _ = check(doc(blocks, toc))
+    assert chapters[-1].kind is C
+    assert chapters[-1].title == title
+
+
+def test_first_lines_index_under_glossary_is_dropped_not_merged() -> None:
+    """A deeper TOC entry "Paragraphs with First Lines" must not end up inside GLOSSARY."""
+    blocks = [
+        head("Chapter 1", 2, None, "a#1"),
+        para(),
+        head("Chapter 2", 2, None, "a#2"),
+        para(),
+        head("GLOSSARY", 2, None, "a#g"),
+        para("ALPHA a word"),
+        para("OMEGA the last word"),
+        head("Paragraphs with First Lines", 3, None, "a#p"),
+        para("I. Of my grandfather Verus I have learned"),
+        para("II. Of him that brought me up"),
+    ]
+    toc = [
+        TocEntry("Chapter 1", 1, "a#1"),
+        TocEntry("Chapter 2", 1, "a#2"),
+        TocEntry("GLOSSARY", 1, "a#g"),
+        TocEntry("Paragraphs with First Lines", 2, "a#p"),
+    ]
+    chapters, _ = check(doc(blocks, toc))
+    assert summary(chapters)[-1] == ("GLOSSARY", B)
+    assert [p.text for p in chapters[-1].paragraphs] == ["ALPHA a word", "OMEGA the last word"]
+
+
 def test_all_caps_heading_after_last_toc_chapter_is_back_matter() -> None:
     """D2: extra works after the last chapter; by-line headings stay paragraphs."""
     blocks = [
@@ -510,6 +575,8 @@ def test_classify_kind() -> None:
     assert classify_kind("CONTENTS.") is None
     assert classify_kind("Contents of the Will") is C
     assert classify_kind("List of Grievances") is C
+    assert classify_kind("Paragraphs with First Lines") is None
+    assert classify_kind("Prologue") is C
     assert FRONT_KEYWORDS and BACK_KEYWORDS and DROP_KEYWORDS
 
 
@@ -556,3 +623,10 @@ def test_real_meditations() -> None:
     ]
     assert [c.title for c in book.chapters if c.kind is B] == ["APPENDIX", "NOTES", "GLOSSARY"]
     assert "BOOKS" not in [c.title for c in book.chapters]
+    # Finding 3: the index of first lines is dropped, GLOSSARY ends with its last item.
+    assert (book.chapters[-1].title, book.chapters[-1].kind) == ("GLOSSARY", B)
+    assert "Paragraphs with First Lines" not in [c.title for c in book.chapters]
+    paragraphs = [p.text for c in book.chapters for p in c.paragraphs]
+    assert "Paragraphs with First Lines" not in paragraphs
+    assert book.chapters[-1].paragraphs[-1].text.startswith("Vespasian, 9th Roman Emperor")
+    assert book.author == "Marcus Aurelius"

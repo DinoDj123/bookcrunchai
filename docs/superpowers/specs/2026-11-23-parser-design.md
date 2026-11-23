@@ -121,6 +121,16 @@ eBook.com" (odd pages) or "The Prince" (even pages), 7 pt; first-line indent x=5
 lines; line-end hyphenation uses U+00AD (soft hyphen); the PDF outline has 30 entries: "The Prince",
 "INTRODUCTION", CHAPTER I–XXVI, two entries with page −1.
 
+Re-measured in A3 (23.11.2026), differences from the facts above: the footer line spans y≈411–420
+of a 484 pt page, i.e. 85–87 % of the height, so it is **not** in the bottom 10 % (the reader uses
+a 15 % zone measured at the line centre); page numbers 2–9 are private-use glyphs U+F643+digit, not
+ASCII digits (from page 10 on they are digits); footnotes are **body-size** (10 pt) paragraphs that
+start with `[*]`, `[+]`, `[%]`, `[#]`, `[&]` or `[$]`, usually indented, placed after the paragraph
+that cites them (there is no small-type footnote text; all 7 pt text is the footer); the book title
+on page 1 is 24 pt (so chapter headings get `heading_level` 2); the titles of the two extra works
+(D2) are body-size all-caps paragraphs of 2–5 lines (up to 26 words); a drop cap with a trailing
+space (`"I "`, p. 20) is a whole word; the catalog has no `/Lang`. Everything else matches.
+
 Steps:
 1. Open; errors as in §2. `NO_TEXT_LAYER` check on raw text.
 2. Per page, `page.get_text("dict")` → lines with `bbox`, spans (size, flags, text). Body size =

@@ -296,21 +296,45 @@ def _read_package(archive: zipfile.ZipFile, opf_path: str) -> _Package:
 def _pick_author(metadata: Tag) -> str | None:
     """First dc:creator, preferring role "aut" (EPUB2 opf:role attribute or EPUB3 refines)."""
     creators = metadata.find_all("creator")
-    roles: dict[str, str] = {}
-    for meta in metadata.find_all("meta", attrs={"property": "role"}):
-        refines = str(meta.get("refines", "")).lstrip("#")
-        roles[refines] = normalize_text(meta.get_text())
+    roles = _refinements(metadata, "role")
+    file_as = _refinements(metadata, "file-as")
     first: str | None = None
     for creator in creators:
         name = _text_of(creator)
         if name is None:
             continue
-        role = creator.get("opf:role") or creator.get("role") or roles.get(str(creator.get("id")))
+        creator_id = str(creator.get("id"))
+        name = _name_from_file_as(
+            name, creator.get("opf:file-as") or creator.get("file-as") or file_as.get(creator_id)
+        )
+        role = creator.get("opf:role") or creator.get("role") or roles.get(creator_id)
         if role == "aut":
             return name
         if first is None:
             first = name
     return first
+
+
+def _refinements(metadata: Tag, prop: str) -> dict[str, str]:
+    """EPUB3 `<meta property="…" refines="#id">value</meta>` as {id: value}."""
+    values: dict[str, str] = {}
+    for meta in metadata.find_all("meta", attrs={"property": prop}):
+        values[str(meta.get("refines", "")).lstrip("#")] = normalize_text(meta.get_text())
+    return values
+
+
+def _name_from_file_as(name: str, file_as: object) -> str:
+    """Prefer the name part of `file-as` when dc:creator has words in front of the name.
+
+    Gutenberg writes `dc:creator` "Emperor of Rome Marcus Aurelius" with `file-as`
+    "Marcus Aurelius, Emperor of Rome": the part before the comma is the name. "Austen, Jane"
+    (surname, given name) has a one-word first part, so "Jane Austen" is kept.
+    """
+    sort_name = normalize_text(str(file_as)) if file_as else ""
+    if not sort_name or sort_name.split()[0].lower() == name.split()[0].lower():
+        return name
+    before_comma = sort_name.split(",", 1)[0].strip()
+    return before_comma if len(before_comma.split()) >= 2 else name
 
 
 # --------------------------------------------------------------------------- navigation

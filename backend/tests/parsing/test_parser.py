@@ -69,7 +69,7 @@ def test_only_boilerplate_is_empty_book(tmp_path: Path) -> None:
     ("name", "title", "author"),
     [
         ("pride-and-prejudice.epub", "Pride and Prejudice", "Jane Austen"),
-        ("meditations.epub", "Meditations", "Emperor of Rome Marcus Aurelius"),
+        ("meditations.epub", "Meditations", "Marcus Aurelius"),
     ],
 )
 def test_real_epub_smoke(name: str, title: str, author: str) -> None:

@@ -84,6 +84,7 @@ def make_epub(
     *,
     title: str | None = "Test Book",
     author: str | None = "Test Author",
+    author_file_as: str | None = None,
     language: str | None = "en",
     docs: list[tuple[str, str]],
     nav: list[NavEntry] | None = None,
@@ -95,12 +96,17 @@ def make_epub(
 
     `docs` are (file name, body HTML) pairs in spine order, stored under OEBPS/.
     `nav` entries become an EPUB3 nav document, or an EPUB2 NCX instead when `ncx` is True.
+    `author_file_as` adds an EPUB3 `file-as` refinement to the creator.
     """
     metadata = []
     if title is not None:
         metadata.append(f"<dc:title>{escape(title)}</dc:title>")
     if author is not None:
-        metadata.append(f"<dc:creator>{escape(author)}</dc:creator>")
+        metadata.append(f'<dc:creator id="author_0">{escape(author)}</dc:creator>')
+    if author_file_as is not None:
+        metadata.append(
+            f'<meta property="file-as" refines="#author_0">{escape(author_file_as)}</meta>'
+        )
     if language is not None:
         metadata.append(f"<dc:language>{escape(language)}</dc:language>")
 

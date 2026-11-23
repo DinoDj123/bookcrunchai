@@ -37,6 +37,32 @@ def test_reads_metadata(tmp_path: Path) -> None:
     assert doc.file_format is FileFormat.EPUB
 
 
+@pytest.mark.parametrize(
+    ("creator", "file_as", "expected"),
+    [
+        # Gutenberg Meditations: words in front of the name in dc:creator.
+        ("Emperor of Rome Marcus Aurelius", "Marcus Aurelius, Emperor of Rome", "Marcus Aurelius"),
+        # "Surname, Given name": one-word first part, dc:creator is kept.
+        ("Jane Austen", "Austen, Jane", "Jane Austen"),
+        # Same first word: dc:creator is already the name.
+        ("Lev Tolstoy", "Lev Nikolayevich Tolstoy", "Lev Tolstoy"),
+        (" Jane Doe ", None, "Jane Doe"),
+    ],
+)
+def test_author_uses_file_as_name_part(
+    tmp_path: Path, creator: str, file_as: str | None, expected: str
+) -> None:
+    path = make_epub(
+        tmp_path, author=creator, author_file_as=file_as, docs=[("a.xhtml", "<p>x</p>")]
+    )
+    assert read_epub(path).author == expected
+
+
+def test_real_book_authors() -> None:
+    assert read_epub(BOOKS / "meditations.epub").author == "Marcus Aurelius"
+    assert read_epub(BOOKS / "pride-and-prejudice.epub").author == "Jane Austen"
+
+
 def test_missing_metadata_is_none(tmp_path: Path) -> None:
     path = make_epub(
         tmp_path, title=None, author=None, language=None, docs=[("a.xhtml", "<p>x</p>")]

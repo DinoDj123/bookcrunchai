@@ -185,6 +185,18 @@ def test_page_of_only_indented_one_line_paragraphs_keeps_every_paragraph(tmp_pat
     assert [t.split()[0] for t in on_page_four] == ["s0", "s1", "s2", "s3"]
 
 
+def test_block_quote_of_indented_full_lines_is_one_block(tmp_path: Path) -> None:
+    before, after = column(filler(3, "a")), column(filler(2, "b"))
+    quote = [(t, INDENT, TOP + (3 + i) * STEP, BODY) for i, t in enumerate(filler(4, "q"))]
+    after = [(t, MARGIN, y + 8 * STEP, size) for t, _, y, size in after]
+    page = [*before, *quote, *after]
+    normal = column(filler(3, "c"), filler(3, "d"))
+    doc = read_pdf(make_pdf(tmp_path, [page, normal, normal, normal, normal]))
+    firsts = [t.split()[0] for t in texts(doc)]
+    assert firsts[:3] == ["a0", "q0", "b0"]
+    assert texts(doc)[1] == " ".join(filler(4, "q"))
+
+
 def test_vertical_gap_starts_a_paragraph(tmp_path: Path) -> None:
     first = column(filler(3, "a"))
     second = column(filler(3, "b"), top=TOP + 5 * STEP, indent=False)

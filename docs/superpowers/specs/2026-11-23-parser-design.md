@@ -161,7 +161,9 @@ Steps:
    `chapters.py`, e.g. "DEDICATION" and the D2 extra-work titles).
 7. **Paragraphs:** a new paragraph starts when the line's x0 is ≥ 0.8 × body size to the right of
    the common left margin (first-line indent; measured over the whole book, separately for odd
-   and even pages, so a page of only indented one-line paragraphs still splits), or the vertical gap to the previous line is
+   and even pages, so a page of only indented one-line paragraphs still splits; consecutive
+   indented lines at the same x continue unless the previous one is under 93 % of the column), or the vertical
+   gap to the previous line is
    > 1.5 × the common line spacing, or after a heading. A paragraph continues across a page break
    unless the last line of the page was short (< 85 % of column width) and ended with `.?!:”’`.
    `page` = page where the paragraph starts.

@@ -47,6 +47,11 @@ INDENT_RATIO = 0.8
 GAP_RATIO = 1.5
 # A page-final line shorter than 85 % of the column width may end its paragraph.
 SHORT_LINE_RATIO = 0.85
+# Two indented lines start at "about the same x" when they differ by less than this x body size.
+SAME_INDENT_RATIO = 0.3
+# Inside an indented run, a line shorter than this share of the column ends its paragraph
+# (justified quote lines reach the edge; salutations and sub-headings stop at 87-90 %).
+FULL_LINE_RATIO = 0.93
 # A body-size all-caps paragraph with at most 30 words is a level-3 heading. The design said one
 # line of <= 12 words, but the titles of the extra works in the-prince.pdf (Decision D2) are
 # all-caps paragraphs of 2-5 lines and up to 26 words.
@@ -90,6 +95,8 @@ class _Layout:
     line_spacing: float
     # Left margin of body lines on odd and even pages, None if that parity has no body lines.
     margins: tuple[float | None, float | None] = (None, None)
+    # Right edge of the widest body line in the book (a page of short lines has no edge of its own).
+    right_edge: float = 0.0
 
     @property
     def heading_size(self) -> float:
@@ -123,7 +130,13 @@ def read_pdf(path: Path) -> RawDocument:
     layout = _measure_layout(pages)
     pages = _remove_running_lines(pages, layout)
     pages = _remove_small_footnotes(pages, layout)
-    layout = replace(layout, margins=_measure_margins(pages, layout))
+    layout = replace(
+        layout,
+        margins=_measure_margins(pages, layout),
+        right_edge=max(
+            (ln.x1 for p in pages for ln in p.lines if not layout.is_heading(ln)), default=0.0
+        ),
+    )
     blocks = _build_blocks(pages, layout)
     return RawDocument(
         title=title,
@@ -369,7 +382,21 @@ def _paragraphs(pages: list[_Page], layout: _Layout) -> list[_Paragraph]:
             elif previous is None:  # first line of the page
                 starts_paragraph = indented or previous_page_ended
             else:
-                starts_paragraph = indented or line.y0 - previous.y0 > max_gap
+                # Lines of an indented block (quote) continue unless the previous one was short.
+                in_indented_run = (
+                    indented
+                    and margin is not None
+                    and previous.x0 - margin >= indent
+                    and not starts_with_footnote_marker(previous.text)
+                    and abs(line.x0 - previous.x0) < SAME_INDENT_RATIO * layout.body_size
+                )
+                if in_indented_run:
+                    assert margin is not None
+                    width = (previous.x1 - margin) / max(layout.right_edge - margin, 1.0)
+                    ended = width < FULL_LINE_RATIO
+                    starts_paragraph = ended or line.y0 - previous.y0 > max_gap
+                else:
+                    starts_paragraph = indented or line.y0 - previous.y0 > max_gap
             if starts_paragraph or current is None:
                 current = _Paragraph(page.number, None)
                 paragraphs.append(current)

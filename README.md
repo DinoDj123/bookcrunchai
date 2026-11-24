@@ -103,6 +103,7 @@ All under `/api/v1`; the full reference is the OpenAPI page at `/api/v1/docs`.
 | `POST /auth/register`, `POST /auth/login` | Create an account or log in; both set the `session` cookie (JWT, 24 hours, httpOnly) |
 | `POST /auth/logout`, `GET /auth/me` | End the session; current user |
 | `POST /books` | Upload an EPUB or PDF (multipart field `file`, at most 50 MB): 202 with the book and its job, or 200 with the existing book if this user already uploaded the same file |
+| `POST /books/{id}/retry` | Process a failed book again: 202 with the book and its job, 409 `BOOK_NOT_FAILED` for a book in any other status |
 | `GET /jobs/{id}` | Status, stage and progress of a job; poll it while the job runs |
 
 Rate limits (429 `RATE_LIMITED`, with `details.retry_after_seconds`): 10 login attempts per minute
@@ -218,6 +219,10 @@ One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`,
   across several API processes. Login is counted per client address, not per email, so nobody
   can lock another user out by guessing at their address. If Redis cannot be reached the request
   is let through: a Redis outage must not stop people from logging in.
+- **Retry queues the failed job again under the same ID** instead of creating a new job. The
+  same file uploaded again only returns the failed book (de-duplication), so
+  `POST /books/{id}/retry` is the only way to process it again. If the queue cannot be reached,
+  the book goes back to `failed` with its old error, so the retry can be repeated.
 - **Migrations are checked in CI.** `tests/db` applies all migrations to an empty database, runs
   `alembic check` (fails if a model changed without a migration) and checks the constraints.
 

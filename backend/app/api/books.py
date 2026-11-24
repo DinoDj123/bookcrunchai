@@ -1,4 +1,5 @@
-"""Book endpoints. This task: upload (FR-002) with de-duplication per user (FR-014)."""
+"""Book endpoints: upload (FR-002) with de-duplication per user (FR-014), and retry of failed
+processing (FR-012)."""
 
 import hashlib
 import logging
@@ -246,3 +247,64 @@ async def upload_book(
         job=JobBrief(id=job.id, status=job.status),
     )
 
+
+@router.post("/{book_id}/retry", status_code=202)
+async def retry_book(
+    book_id: uuid.UUID, user: CurrentUser, session: SessionDep, queue: QueueDep
+) -> UploadOut:
+    """Process a failed book again. The same file uploaded again only returns the failed book
+    (de-duplication), so this is the way to get it processed after a failure.
+
+    202 with the book and its job; 409 BOOK_NOT_FAILED unless the book's status is `failed`.
+    """
+    # Only the owner, also for demo books. Someone else's book is simply not found
+    # (specification 7.3). The row is locked, so two retries at once cannot both pass the check.
+    book = await session.scalar(
+        select(Book).where(Book.id == book_id, Book.owner_id == user.id).with_for_update()
+    )
+    if book is None:
+        raise AppError(404, "BOOK_NOT_FOUND", "Book not found.")
+    if book.status != BookStatus.FAILED:
+        raise AppError(409, "BOOK_NOT_FAILED", "Only a book that failed can be processed again.")
+
+    # The failed job is queued again under the same ID, not copied: the worker resets it when it
+    # starts, and steps that finished before the failure stay stored (specification 4.5).
+    job = await session.scalar(
+        select(Job)
+        .where(Job.book_id == book.id, Job.type == JobType.PROCESS_BOOK)
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
+    if job is None:
+        job = Job(id=uuid.uuid4(), book_id=book.id, type=JobType.PROCESS_BOOK)
+        session.add(job)
+    failure = (book.error_code, job.error_code, job.error_message, job.finished_at)
+    job.status = JobStatus.QUEUED
+    job.stage = None
+    job.progress = 0
+    job.error_code = None
+    job.error_message = None
+    job.finished_at = None
+    book.status = BookStatus.PROCESSING
+    book.error_code = None
+    # Committed before enqueuing: the worker must find the job queued when it looks for it.
+    await session.commit()
+
+    try:
+        # False means the queue still holds this job (a try that died with its worker) and will
+        # run it by itself, so there is nothing to add.
+        await enqueue_job(queue, job)
+    except Exception as error:
+        # Back to failed, so that the user can retry once the queue is back instead of looking at
+        # a book that is "processing" for ever.
+        logger.exception("Job %s could not be queued; book %s stays failed", job.id, book.id)
+        book.status = BookStatus.FAILED
+        job.status = JobStatus.FAILED
+        book.error_code, job.error_code, job.error_message, job.finished_at = failure
+        await session.commit()
+        raise queue_unavailable() from error
+
+    return UploadOut(
+        book=BookBrief(id=book.id, title=book.title, status=book.status),
+        job=JobBrief(id=job.id, status=job.status),
+    )

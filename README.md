@@ -105,6 +105,9 @@ All under `/api/v1`; the full reference is the OpenAPI page at `/api/v1/docs`.
 | `POST /books` | Upload an EPUB or PDF (multipart field `file`, at most 50 MB): 202 with the book and its job, or 200 with the existing book if this user already uploaded the same file |
 | `GET /jobs/{id}` | Status, stage and progress of a job; poll it while the job runs |
 
+Rate limits (429 `RATE_LIMITED`, with `details.retry_after_seconds`): 10 login attempts per minute
+per client address (`LOGIN_RATE_LIMIT`) and 20 uploads per hour per user (`UPLOAD_RATE_LIMIT`).
+
 Try it with curl (the cookie is kept in `jar`):
 
 ```bash
@@ -210,9 +213,20 @@ One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`,
   such as `(chapter_id, book_id) → chapters (id, book_id)` (`same_book()` in `models.py`). A bug
   that mixes IDs fails loudly instead of showing a passage of another user's book. Emails have a
   lower-case CHECK. See specification 1.2, Appendix D.
+- **Rate limits are counters in Redis** (`backend/app/api/rate_limit.py`): `INCR` with an expiry
+  set by the first request of a window, in one transaction. No new library, and the limit holds
+  across several API processes. Login is counted per client address, not per email, so nobody
+  can lock another user out by guessing at their address. If Redis cannot be reached the request
+  is let through: a Redis outage must not stop people from logging in.
 - **Migrations are checked in CI.** `tests/db` applies all migrations to an empty database, runs
   `alembic check` (fails if a model changed without a migration) and checks the constraints.
 
 ## Known limitations
 
-Written as features land. No authentication or upload yet.
+Written as features land.
+
+- Registration is not rate-limited (the specification asks for limits on login, upload and
+  questions only).
+- The rate limit windows are fixed, so a client can send up to twice the limit around the moment
+  a window ends.
+- No frontend pages yet; the API is used through `/api/v1/docs` or curl.

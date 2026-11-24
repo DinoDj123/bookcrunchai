@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from arq.connections import ArqRedis
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import delete, select
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
 from app.api.deps import CurrentUser, QueueDep, SessionDep, SettingsDep
+from app.api.rate_limit import limit_uploads
 from app.core.errors import AppError
 from app.db.models import Book, BookStatus, Job, JobStatus, JobType
 from app.parsing import FileFormat, normalize_text
@@ -134,7 +135,13 @@ async def existing_upload(session: AsyncSession, queue: ArqRedis, book: Book) ->
     )
 
 
-@router.post("", status_code=202, openapi_extra={"requestBody": UPLOAD_REQUEST_BODY})
+@router.post(
+    "",
+    status_code=202,
+    openapi_extra={"requestBody": UPLOAD_REQUEST_BODY},
+    # Checked before the request body is read, like the session.
+    dependencies=[Depends(limit_uploads)],
+)
 async def upload_book(
     request: Request,
     response: Response,
@@ -238,3 +245,4 @@ async def upload_book(
         book=BookBrief(id=book.id, title=book.title, status=book.status),
         job=JobBrief(id=job.id, status=job.status),
     )
+

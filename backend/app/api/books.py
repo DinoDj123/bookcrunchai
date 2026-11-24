@@ -5,6 +5,7 @@ import hashlib
 import logging
 import re
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from arq.connections import ArqRedis
@@ -17,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
 from app.api.deps import CurrentUser, QueueDep, SessionDep, SettingsDep
-from app.api.rate_limit import limit_uploads
+from app.api.rate_limit import CounterDep, count_upload, limit_uploads
 from app.core.errors import AppError
 from app.db.models import Book, BookStatus, Job, JobStatus, JobType
 from app.parsing import FileFormat, normalize_text
@@ -140,7 +141,8 @@ async def existing_upload(session: AsyncSession, queue: ArqRedis, book: Book) ->
     "",
     status_code=202,
     openapi_extra={"requestBody": UPLOAD_REQUEST_BODY},
-    # Checked before the request body is read, like the session.
+    # Checked before the request body is read, like the session. Counted at the end, only for an
+    # upload that became a book.
     dependencies=[Depends(limit_uploads)],
 )
 async def upload_book(
@@ -150,6 +152,7 @@ async def upload_book(
     session: SessionDep,
     settings: SettingsDep,
     queue: QueueDep,
+    counter: CounterDep,
 ) -> UploadOut:
     """Upload an EPUB or PDF (form field `file`, at most 50 MB) and queue its processing.
 
@@ -242,43 +245,107 @@ async def upload_book(
         stored_path.unlink(missing_ok=True)
         raise queue_unavailable() from error
 
+    await count_upload(counter, owner_id)
     return UploadOut(
         book=BookBrief(id=book.id, title=book.title, status=book.status),
         job=JobBrief(id=job.id, status=job.status),
     )
 
 
-@router.post("/{book_id}/retry", status_code=202)
+# What a failed book and its job looked like before a retry reset them: the book's error code and
+# the job's error code, error message, finish time, stage and progress.
+Failure = tuple[str | None, str | None, str | None, datetime | None, str | None, int]
+
+
+async def restore_failure(session: AsyncSession, book: Book, job: Job, failure: Failure) -> bool:
+    """Put a book that retry_book could not queue back to failed, so that the retry can be
+    repeated. Returns False, and changes nothing, if the worker has started the job after all.
+
+    The rows are read again and locked first: "could not queue" is not certain (Redis may have
+    accepted the job and only the answer got lost), and writing "failed" over a job that is
+    running or done would hide a book that is being processed.
+    """
+    await session.refresh(book, with_for_update=True)
+    await session.refresh(job, with_for_update=True)
+    if job.status != JobStatus.QUEUED:
+        await session.commit()  # only releases the locks
+        return False
+    book.status = BookStatus.FAILED
+    job.status = JobStatus.FAILED
+    (
+        book.error_code,
+        job.error_code,
+        job.error_message,
+        job.finished_at,
+        job.stage,
+        job.progress,
+    ) = failure
+    await session.commit()
+    return True
+
+
+# The same limit as upload: a retry starts the same processing.
+@router.post("/{book_id}/retry", status_code=202, dependencies=[Depends(limit_uploads)])
 async def retry_book(
-    book_id: uuid.UUID, user: CurrentUser, session: SessionDep, queue: QueueDep
+    book_id: uuid.UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    queue: QueueDep,
+    counter: CounterDep,
 ) -> UploadOut:
     """Process a failed book again. The same file uploaded again only returns the failed book
     (de-duplication), so this is the way to get it processed after a failure.
 
-    202 with the book and its job; 409 BOOK_NOT_FAILED unless the book's status is `failed`.
+    202 with the book and its job; 409 BOOK_NOT_FAILED unless the book's status is `failed` or
+    its job is still waiting in the queue; 503 QUEUE_UNAVAILABLE if it cannot be queued now.
     """
+    owner_id = user.id
     # Only the owner, also for demo books. Someone else's book is simply not found
     # (specification 7.3). The row is locked, so two retries at once cannot both pass the check.
     book = await session.scalar(
-        select(Book).where(Book.id == book_id, Book.owner_id == user.id).with_for_update()
+        select(Book).where(Book.id == book_id, Book.owner_id == owner_id).with_for_update()
     )
     if book is None:
         raise AppError(404, "BOOK_NOT_FOUND", "Book not found.")
-    if book.status != BookStatus.FAILED:
-        raise AppError(409, "BOOK_NOT_FAILED", "Only a book that failed can be processed again.")
-
-    # The failed job is queued again under the same ID, not copied: the worker resets it when it
-    # starts, and steps that finished before the failure stay stored (specification 4.5).
     job = await session.scalar(
         select(Job)
         .where(Job.book_id == book.id, Job.type == JobType.PROCESS_BOOK)
         .order_by(Job.created_at.desc())
         .limit(1)
     )
+
+    if book.status != BookStatus.FAILED:
+        if job is None or job.status != JobStatus.QUEUED:
+            raise AppError(
+                409, "BOOK_NOT_FAILED", "Only a book that failed can be processed again."
+            )
+        # The job is waiting. Normally it is in the queue and this does nothing (same job ID). But
+        # if the API stopped between saving "queued" and enqueuing, nobody else would ever start
+        # the job and the book would stay "processing" for ever (same rescue as existing_upload).
+        # Not counted for the rate limit: no new work is started.
+        try:
+            await enqueue_job(queue, job)
+        except Exception as error:
+            logger.exception("Job %s could not be queued", job.id)
+            raise queue_unavailable() from error
+        return UploadOut(
+            book=BookBrief(id=book.id, title=book.title, status=book.status),
+            job=JobBrief(id=job.id, status=job.status),
+        )
+
+    # The failed job is queued again under the same ID, not copied: the worker resets it when it
+    # starts, and steps that finished before the failure stay stored (specification 4.5).
     if job is None:
         job = Job(id=uuid.uuid4(), book_id=book.id, type=JobType.PROCESS_BOOK)
         session.add(job)
-    failure = (book.error_code, job.error_code, job.error_message, job.finished_at)
+    failure: Failure = (
+        book.error_code,
+        job.error_code,
+        job.error_message,
+        job.finished_at,
+        job.stage,
+        job.progress or 0,
+    )
     job.status = JobStatus.QUEUED
     job.stage = None
     job.progress = 0
@@ -291,19 +358,20 @@ async def retry_book(
     await session.commit()
 
     try:
-        # False means the queue still holds this job (a try that died with its worker) and will
-        # run it by itself, so there is nothing to add.
-        await enqueue_job(queue, job)
-    except Exception as error:
-        # Back to failed, so that the user can retry once the queue is back instead of looking at
-        # a book that is "processing" for ever.
-        logger.exception("Job %s could not be queued; book %s stays failed", job.id, book.id)
-        book.status = BookStatus.FAILED
-        job.status = JobStatus.FAILED
-        book.error_code, job.error_code, job.error_message, job.finished_at = failure
-        await session.commit()
-        raise queue_unavailable() from error
+        # False: the queue still holds an earlier delivery of this job (a try that died with its
+        # worker, which is how fail_stale_jobs came to fail it). That delivery may have no tries
+        # left, and then the worker only marks the job failed again without parsing anything. So
+        # this is not a retry we can promise; the user repeats it once the queue has let go.
+        queued = await enqueue_job(queue, job)
+    except Exception:
+        logger.exception("Job %s could not be queued", job.id)
+        queued = False
+    if not queued and await restore_failure(session, book, job, failure):
+        # Back to failed, so that the user can retry later instead of looking at a book that is
+        # "processing" for ever.
+        raise queue_unavailable()
 
+    await count_upload(counter, owner_id)
     return UploadOut(
         book=BookBrief(id=book.id, title=book.title, status=book.status),
         job=JobBrief(id=job.id, status=job.status),

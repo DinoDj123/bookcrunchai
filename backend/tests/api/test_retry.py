@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.db.models import Book, Job
 from app.worker.tasks import process_book
-from tests.api.conftest import FakeQueue, register
+from tests.api.conftest import FakeCounter, FakeQueue, register
 
 pytestmark = pytest.mark.anyio
 
@@ -97,9 +97,12 @@ async def test_retried_book_is_processed_when_the_cause_is_gone(
     assert (await upload(client))["book"]["status"] == "ready"
 
 
-@pytest.mark.parametrize("status", ["uploaded", "processing", "ready"])
+@pytest.mark.parametrize(
+    ("book_status", "job_status"), [("processing", "running"), ("ready", "done")]
+)
 async def test_book_that_did_not_fail_cannot_be_retried(
-    status: str,
+    book_status: str,
+    job_status: str,
     client: AsyncClient,
     registered: str,
     session: AsyncSession,
@@ -107,7 +110,8 @@ async def test_book_that_did_not_fail_cannot_be_retried(
 ) -> None:
     uploaded = await upload(client)
     book = await session.get_one(Book, uuid.UUID(uploaded["book"]["id"]))
-    book.status = status
+    job = await session.get_one(Job, uuid.UUID(uploaded["job"]["id"]))
+    book.status, job.status = book_status, job_status
     await session.flush()
 
     response = await retry(client, uploaded["book"]["id"])
@@ -159,3 +163,96 @@ async def test_queue_failure_leaves_the_book_failed_and_retryable(
 
     queue.fail = False
     assert (await retry(client, failed["book"]["id"])).status_code == 202
+
+
+async def test_queue_failure_restores_the_stage_of_the_failure(
+    client: AsyncClient, failed: dict[str, Any], session: AsyncSession, queue: FakeQueue
+) -> None:
+    queue.fail = True
+
+    await retry(client, failed["book"]["id"])
+
+    job = await session.get_one(Job, uuid.UUID(failed["job"]["id"]), populate_existing=True)
+    assert (job.stage, job.progress) == ("parsing", 0)
+
+
+async def test_job_still_held_by_the_queue_is_not_a_retry(
+    client: AsyncClient, failed: dict[str, Any], session: AsyncSession, queue: FakeQueue
+) -> None:
+    """ARQ still has an earlier delivery of the job (enqueue answers None). That delivery may
+    have no tries left, so the book must not be left "processing" on a promise."""
+    queue.held = True
+
+    response = await retry(client, failed["book"]["id"])
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "QUEUE_UNAVAILABLE"
+    book = await session.get_one(Book, uuid.UUID(failed["book"]["id"]), populate_existing=True)
+    job = await session.get_one(Job, uuid.UUID(failed["job"]["id"]), populate_existing=True)
+    assert (book.status, book.error_code) == ("failed", "CORRUPT_FILE")
+    assert (job.status, job.error_code) == ("failed", "CORRUPT_FILE")
+
+    queue.held = False
+    assert (await retry(client, failed["book"]["id"])).status_code == 202
+
+
+async def test_queue_error_does_not_overwrite_a_job_the_worker_started(
+    client: AsyncClient,
+    failed: dict[str, Any],
+    settings: Settings,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    queue: FakeQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redis accepted the job but its answer got lost: the API sees an error while the worker
+    already processes the book."""
+    monkeypatch.delenv("FAKE_PARSER_ERROR")
+
+    async def accepted_but_no_answer(function: str, job_id: str, **_: Any) -> object:
+        await run_worker(job_id, settings, session_factory)
+        raise TimeoutError("no answer from redis")
+
+    monkeypatch.setattr(queue, "enqueue_job", accepted_but_no_answer)
+
+    response = await retry(client, failed["book"]["id"])
+
+    assert response.status_code == 202
+    assert response.json()["book"]["status"] == "ready"
+    assert response.json()["job"]["status"] == "done"
+    book = await session.get_one(Book, uuid.UUID(failed["book"]["id"]), populate_existing=True)
+    job = await session.get_one(Job, uuid.UUID(failed["job"]["id"]), populate_existing=True)
+    assert (book.status, book.error_code) == ("ready", None)
+    assert (job.status, job.error_code, job.progress) == ("done", None, 100)
+
+
+async def test_retry_hands_a_waiting_job_to_the_queue_again(
+    client: AsyncClient,
+    failed: dict[str, Any],
+    session: AsyncSession,
+    queue: FakeQueue,
+    counter: FakeCounter,
+) -> None:
+    """The API stopped after saving "processing"/"queued" and before enqueuing: without this the
+    book could never be retried (409) and would stay "processing" for ever."""
+    book_id, job_id = failed["book"]["id"], failed["job"]["id"]
+    book = await session.get_one(Book, uuid.UUID(book_id), populate_existing=True)
+    job = await session.get_one(Job, uuid.UUID(job_id), populate_existing=True)
+    book.status, job.status = "processing", "queued"
+    await session.flush()
+    counted = dict(counter.counts)
+
+    response = await retry(client, book_id)
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "book": {"id": book_id, "title": failed["book"]["title"], "status": "processing"},
+        "job": {"id": job_id, "status": "queued"},
+    }
+    assert queue.calls[-1] == ("process_book", (job_id,), {"_job_id": job_id})
+    assert counter.counts == counted  # no new work, so nothing counted
+
+    queue.fail = True
+    assert (await retry(client, book_id)).status_code == 503
+    await session.refresh(book)
+    assert book.status == "processing"

@@ -103,11 +103,13 @@ All under `/api/v1`; the full reference is the OpenAPI page at `/api/v1/docs`.
 | `POST /auth/register`, `POST /auth/login` | Create an account or log in; both set the `session` cookie (JWT, 24 hours, httpOnly) |
 | `POST /auth/logout`, `GET /auth/me` | End the session; current user |
 | `POST /books` | Upload an EPUB or PDF (multipart field `file`, at most 50 MB): 202 with the book and its job, or 200 with the existing book if this user already uploaded the same file |
-| `POST /books/{id}/retry` | Process a failed book again: 202 with the book and its job, 409 `BOOK_NOT_FAILED` for a book in any other status |
+| `POST /books/{id}/retry` | Process a failed book again: 202 with the book and its job, 409 `BOOK_NOT_FAILED` for a book that is being processed or is ready, 503 `QUEUE_UNAVAILABLE` if it cannot be queued now (the book stays `failed`) |
 | `GET /jobs/{id}` | Status, stage and progress of a job; poll it while the job runs |
 
-Rate limits (429 `RATE_LIMITED`, with `details.retry_after_seconds`): 10 login attempts per minute
-per client address (`LOGIN_RATE_LIMIT`) and 20 uploads per hour per user (`UPLOAD_RATE_LIMIT`).
+Rate limits (429 `RATE_LIMITED`, with `details.retry_after_seconds` and a `Retry-After` header):
+10 login attempts per minute per client address (`LOGIN_RATE_LIMIT`) and 20 processed books per
+hour per user (`UPLOAD_RATE_LIMIT`). A processed book is an upload that was stored or a retry; a
+rejected file and a repeated upload of the same file are not counted.
 
 Try it with curl (the cookie is kept in `jar`):
 
@@ -215,14 +217,25 @@ One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`,
   that mixes IDs fails loudly instead of showing a passage of another user's book. Emails have a
   lower-case CHECK. See specification 1.2, Appendix D.
 - **Rate limits are counters in Redis** (`backend/app/api/rate_limit.py`): `INCR` with an expiry
-  set by the first request of a window, in one transaction. No new library, and the limit holds
-  across several API processes. Login is counted per client address, not per email, so nobody
-  can lock another user out by guessing at their address. If Redis cannot be reached the request
-  is let through: a Redis outage must not stop people from logging in.
+  set by the first request of a window (`SET ... EX NX`, which also works before Redis 7), in one
+  transaction. No new library, and the limit holds across several API processes. Login is counted
+  per client address, not per email, so nobody can lock another user out by guessing at their
+  address. If Redis cannot be reached the request is let through: a Redis outage must not stop
+  people from logging in. The log then names only the limit, never the address or user.
+- **The upload limit counts started work, not requests.** It is checked before the request body
+  is read and counted only after a book was queued, so a wrong file type or a file the user
+  already uploaded does not use it up. Retry shares the limit; otherwise one file that always
+  fails could be processed without end. Rejected alternative: counting every request, which is
+  one step instead of two but blocks a user who stored nothing.
 - **Retry queues the failed job again under the same ID** instead of creating a new job. The
   same file uploaded again only returns the failed book (de-duplication), so
-  `POST /books/{id}/retry` is the only way to process it again. If the queue cannot be reached,
-  the book goes back to `failed` with its old error, so the retry can be repeated.
+  `POST /books/{id}/retry` is the only way to process it again. If the job cannot be queued
+  (Redis is away, or ARQ still holds an earlier delivery of the job that may have no tries left),
+  the book goes back to `failed` with its old error and the answer is 503, so the retry can be
+  repeated. Before writing `failed` the API reads the job again: if the worker started it after
+  all, nothing is overwritten. A book whose job is still `queued` can also be retried; that only
+  hands the job to the queue again and rescues a book left `processing` by an API that stopped
+  between saving and enqueuing.
 - **Migrations are checked in CI.** `tests/db` applies all migrations to an empty database, runs
   `alembic check` (fails if a model changed without a migration) and checks the constraints.
 
@@ -233,5 +246,6 @@ Written as features land.
 - Registration is not rate-limited (the specification asks for limits on login, upload and
   questions only).
 - The rate limit windows are fixed, so a client can send up to twice the limit around the moment
-  a window ends.
+  a window ends. Uploads sent at the same moment can also go over the upload limit by a few,
+  because the limit is checked before the upload and counted after it.
 - No frontend pages yet; the API is used through `/api/v1/docs` or curl.

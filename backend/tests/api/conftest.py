@@ -21,17 +21,19 @@ UPLOAD_LIMIT = 1024  # bytes; small, so the "too large" tests stay fast
 
 
 class FakeQueue:
-    """Stands in for the ARQ pool: records what was enqueued, or fails like Redis being down."""
+    """Stands in for the ARQ pool: records what was enqueued, fails like Redis being down, or
+    answers like ARQ does when it still holds a job with the same ID."""
 
     def __init__(self) -> None:
         self.fail = False
+        self.held = False
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
 
     async def enqueue_job(self, function: str, *args: Any, **kwargs: Any) -> object:
         if self.fail:
             raise ConnectionError("redis is down")
         self.calls.append((function, args, kwargs))
-        return object()
+        return None if self.held else object()
 
 
 class FakeCounter:
@@ -49,6 +51,11 @@ class FakeCounter:
             raise ConnectionError("redis is down")
         self.counts[key] = self.counts.get(key, 0) + 1
         return self.counts[key], self.WINDOW_LEFT
+
+    async def peek(self, key: str) -> tuple[int, int]:
+        if self.fail:
+            raise ConnectionError("redis is down")
+        return self.counts.get(key, 0), self.WINDOW_LEFT
 
 
 @pytest.fixture

@@ -1,11 +1,16 @@
 """Rate limits (specification 4.2: login, upload and question endpoints).
 
 A fixed window counted in Redis: the first request creates a counter that expires when the window
-ends, every request adds one, and a request that pushes the counter over the limit gets
-429 RATE_LIMITED. Redis is shared by all API processes, so the limit holds with several of them.
+ends, every counted request adds one, and a request over the limit gets 429 RATE_LIMITED. Redis is
+shared by all API processes, so the limit holds with several of them.
+
+Login counts every attempt. Upload counts only the work that was really started (a stored book or
+a retry): the limit is checked before the request body is read, and the counter is raised after
+the book is queued. A rejected file or a repeated upload of the same file costs the user nothing.
 """
 
 import logging
+import uuid
 from typing import Annotated
 
 from arq.connections import ArqRedis
@@ -30,13 +35,23 @@ class RequestCounter:
         """Count one request; return the count in the current window and the seconds until the
         window ends."""
         # One transaction, so a counter can never be left without an expiry (it would block its
-        # owner for ever). NX: only the first request of a window sets the expiry.
+        # owner for ever). SET ... NX creates the counter with its expiry only if there is none,
+        # so only the first request of a window starts it. (EXPIRE ... NX would be shorter, but
+        # it needs Redis 7.)
         async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.set(key, 0, ex=window_seconds, nx=True)
             pipe.incr(key)
-            pipe.expire(key, window_seconds, nx=True)
             pipe.ttl(key)
-            count, _, seconds_left = await pipe.execute()
+            _, count, seconds_left = await pipe.execute()
         return int(count), max(int(seconds_left), 1)
+
+    async def peek(self, key: str) -> tuple[int, int]:
+        """The count in the current window and the seconds until it ends, without counting."""
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.get(key)
+            pipe.ttl(key)
+            count, seconds_left = await pipe.execute()
+        return int(count or 0), max(int(seconds_left), 1)
 
 
 def get_request_counter(request: Request) -> RequestCounter:
@@ -46,21 +61,35 @@ def get_request_counter(request: Request) -> RequestCounter:
 CounterDep = Annotated[RequestCounter, Depends(get_request_counter)]
 
 
-async def _check(counter: RequestCounter, key: str, limit: int, window_seconds: int) -> None:
+def rate_limited(seconds_left: int) -> AppError:
+    return AppError(
+        429,
+        "RATE_LIMITED",
+        "Too many requests. Try again later.",
+        {"retry_after_seconds": seconds_left},
+        # The standard header, for clients that do not read our error body.
+        headers={"Retry-After": str(seconds_left)},
+    )
+
+
+async def _count(
+    counter: RequestCounter, name: str, subject: str, window_seconds: int, *, add: bool
+) -> tuple[int, int]:
+    """The count for one subject (an address, a user) of the limit `name`, after adding this
+    request if `add` is set."""
+    key = f"rate:{name}:{subject}"
     try:
-        count, seconds_left = await counter.hit(f"rate:{key}", window_seconds)
-    except Exception:
+        if add:
+            return await counter.hit(key, window_seconds)
+        return await counter.peek(key)
+    except Exception as error:
         # Redis is down. Letting the request through keeps login working; a refused request
         # here would turn a Redis outage into an outage of the whole application.
-        logger.exception("Rate limit for %s could not be checked", key)
-        return
-    if count > limit:
-        raise AppError(
-            429,
-            "RATE_LIMITED",
-            "Too many requests. Try again later.",
-            {"retry_after_seconds": seconds_left},
-        )
+        # Only the limit's name is logged: the subject is an IP address or a user ID
+        # (specification 4.2, no personal data in logs). No traceback either, this happens on
+        # every request while Redis is away.
+        logger.warning("Rate limit '%s' could not be checked: %r", name, error)
+        return 0, 1
 
 
 async def limit_logins(request: Request, counter: CounterDep, settings: SettingsDep) -> None:
@@ -68,9 +97,25 @@ async def limit_logins(request: Request, counter: CounterDep, settings: Settings
     then anyone could lock another user out by guessing at their address."""
     # Behind Caddy, uvicorn runs with --proxy-headers, so this is the browser's address.
     address = request.client.host if request.client else "unknown"
-    await _check(counter, f"login:{address}", settings.login_rate_limit, LOGIN_WINDOW_SECONDS)
+    count, seconds_left = await _count(counter, "login", address, LOGIN_WINDOW_SECONDS, add=True)
+    if count > settings.login_rate_limit:
+        raise rate_limited(seconds_left)
 
 
 async def limit_uploads(user: CurrentUser, counter: CounterDep, settings: SettingsDep) -> None:
-    """Per user: every upload is a file on disk and, later, paid LLM work."""
-    await _check(counter, f"upload:{user.id}", settings.upload_rate_limit, UPLOAD_WINDOW_SECONDS)
+    """Per user: every processed book is a file on disk and, later, paid LLM work. Refuses the
+    request if the user has used up the limit; count_upload() does the counting.
+
+    Checking and counting are two steps, so requests sent at the same moment can pass together
+    and go over the limit by a few. That is acceptable for an abuse limit.
+    """
+    count, seconds_left = await _count(
+        counter, "upload", str(user.id), UPLOAD_WINDOW_SECONDS, add=False
+    )
+    if count >= settings.upload_rate_limit:
+        raise rate_limited(seconds_left)
+
+
+async def count_upload(counter: RequestCounter, user_id: uuid.UUID) -> None:
+    """Count one started processing (a new book, or a retry of a failed one) for the user."""
+    await _count(counter, "upload", str(user_id), UPLOAD_WINDOW_SECONDS, add=True)

@@ -104,11 +104,18 @@ All under `/api/v1`; the full reference is the OpenAPI page at `/api/v1/docs`.
 | `POST /auth/logout`, `GET /auth/me` | End the session; current user |
 | `POST /books` | Upload an EPUB or PDF (multipart field `file`, at most 50 MB): 202 with the book and its job, or 200 with the existing book if this user already uploaded the same file |
 | `POST /books/{id}/retry` | Process a failed book again: 202 with the book and its job, 409 `BOOK_NOT_FAILED` for a book that is being processed or is ready, 503 `QUEUE_UNAVAILABLE` if it cannot be queued now (the book stays `failed`) |
+| `GET /books` | The library: own books and demo books, newest first (`is_demo` tells them apart) |
+| `GET /books/{id}` | One book with `chapter_count`, `active_job` (the job to poll, or null), `error_message` of a failed book and usage totals |
+| `GET /books/{id}/chapters` | Table of contents: `position`, `title`, `kind`, `word_count`, `has_notes` |
+| `GET /books/{id}/usage` | Tokens and estimated cost by pipeline step and in total; `cost_usd` is a decimal string |
 | `GET /jobs/{id}` | Status, stage and progress of a job; poll it while the job runs |
 
 Rate limits (429 `RATE_LIMITED`, with `details.retry_after_seconds` and a `Retry-After` header):
-10 login attempts per minute per client address (`LOGIN_RATE_LIMIT`) and 20 processed books per
-hour per user (`UPLOAD_RATE_LIMIT`). A processed book is an upload that was stored or a retry; a
+10 login attempts and 5 registrations per minute per client address (`LOGIN_RATE_LIMIT`,
+`REGISTER_RATE_LIMIT`) and 20 processed books per hour per user (`UPLOAD_RATE_LIMIT`). The client
+address is the one Caddy saw; an `X-Forwarded-For` header sent by the client is not trusted.
+Another user's book answers 404 `BOOK_NOT_FOUND` on every book endpoint; demo books can be read
+by everyone and changed by no one. A processed book is an upload that was stored or a retry; a
 rejected file and a repeated upload of the same file are not counted.
 
 Try it with curl (the cookie is kept in `jar`):

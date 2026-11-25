@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # Rate limits (section 4.2, app.api.rate_limit): login attempts per client address per minute,
     # uploads per user per hour.
     login_rate_limit: int = 10
+    register_rate_limit: int = 5  # registrations per client address per minute
     upload_rate_limit: int = 20
 
     # Signs the session JWT (section 7.3). Must be overridden outside local development.

@@ -35,7 +35,7 @@ async def test_success_marks_job_done_and_book_ready(
     await session.refresh(book)
 
     assert queued_job.status == "done"
-    assert queued_job.stage == "parsing"
+    assert queued_job.stage == "chapter_notes"
     assert queued_job.progress == 100
     assert queued_job.attempts == 1
     assert queued_job.started_at is not None

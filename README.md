@@ -119,11 +119,29 @@ Uploaded files are stored in `STORAGE_DIR` as `<book id>.epub` or `<book id>.pdf
 ## Background jobs
 
 The API saves a row in `jobs` and puts only its ID on the Redis queue (`app/worker/queue.py`); the
-worker (`app/worker/tasks.py`) reads the job and the book from PostgreSQL, runs the parser and
-writes status, chapters and errors back. PostgreSQL is the only place where job status lives.
+worker (`app/worker/tasks.py`) reads the job and the book from PostgreSQL, runs the pipeline and
+writes status, results and errors back. PostgreSQL is the only place where job status lives.
+
+`process_book` runs the stages **parsing → chunking → chapter notes**, then marks the book `ready`
+(embedding comes in week 3). `jobs.progress` is one percentage for the whole job: parsing ends at
+10 %, chunking at 20 %, the chapter notes fill the rest chapter by chapter.
+
+- Chapters and their chunks are stored together as soon as chunking is done, and every chapter's
+  notes as soon as they arrive. A retried job continues from there: a book that already has chunks
+  is not parsed again, and only chapters without notes get notes, so no LLM call is paid twice.
+- Chapter notes are written for front matter and chapters, not for back matter (proposal waiting
+  for Track A).
+- **Temporary:** chunking and chapter notes are fakes in `app/worker/pipeline_draft.py`
+  (`BOOKCRUNCH_CHUNKER=fake`, `BOOKCRUNCH_NOTES=fake`), built on the draft chunking contract that
+  Track A has not agreed yet. The fake notes make no LLM call. When Track A's code is merged, the
+  worker imports it from `app.pipeline` and the draft module is deleted.
 
 - A file the parser rejects (damaged, protected, scanned, not a book) fails the job at once with
-  the parser's error code; the book is marked `failed` too.
+  the parser's error code; the book is marked `failed` too. A chunker or notes code that breaks
+  its contract or crashes fails the job at once as well (`CHUNKER_…`, `NOTES_…` codes).
+- An LLM call that cannot succeed fails the job at once: `COST_LIMIT_EXCEEDED` (FR-017) or
+  `LLM_REQUEST_FAILED`. An LLM service that stays unavailable is retried like any other error and
+  ends as `LLM_UNAVAILABLE` after the last attempt.
 - Other errors (database, network) are retried by ARQ, 3 attempts in total, then the job and the
   book are marked `failed` with `INTERNAL_ERROR`. An attempt that died with the worker (killed,
   out of memory) counts too.

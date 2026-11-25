@@ -1,4 +1,9 @@
-// Placeholder until the library page (section 8.1) replaces it.
-export default function Home() {
-  return <h1 className="text-2xl font-semibold">Library</h1>;
+import type { Metadata } from "next";
+
+import { Library } from "@/components/library/Library";
+
+export const metadata: Metadata = { title: "Library – bookcrunch.ai" };
+
+export default function LibraryPage() {
+  return <Library />;
 }

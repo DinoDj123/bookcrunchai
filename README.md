@@ -184,9 +184,10 @@ Result of uploading the three test books through the API and the worker (23.11.2
 
 ## Deployment
 
-One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`, a random `JWT_SECRET` (the API, the worker and the migrations refuse to start with the example value once `SITE_ADDRESS` is a domain) and `SITE_ADDRESS` to the domain in `.env`
-(Caddy then gets an HTTPS certificate), `docker compose up --build -d`,
-`docker compose run --rm api alembic upgrade head`.
+One Linux VM with Docker Compose. The steps, the `.env` values for the host, troubleshooting and
+the daily database backup are in [docs/deploy.md](docs/deploy.md); `scripts/deploy.sh` does a
+deployment (`git pull`, build, migrations, `docker compose up -d`) and `scripts/backup_db.sh` the
+backup. Not deployed yet: the VM and the domain are not available.
 
 ## Design decisions
 

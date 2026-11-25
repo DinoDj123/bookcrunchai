@@ -32,3 +32,6 @@ Thumbs.db
 
 # archives
 *.zip
+
+# database dumps (scripts/backup_db.sh)
+backups/

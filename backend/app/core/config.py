@@ -1,5 +1,6 @@
 """Application settings, read from environment variables (see .env.example in the repo root)."""
 
+from decimal import Decimal
 from functools import lru_cache
 from typing import Self
 
@@ -24,6 +25,20 @@ class Settings(BaseSettings):
     storage_dir: str = "./storage"
     # Largest accepted book file (FR-002). The proxy has the same limit (Caddyfile).
     max_upload_bytes: int = 50 * 1024 * 1024
+
+    # Claude API (app.llm). Without a key the application runs, but any LLM call fails.
+    anthropic_api_key: str | None = None
+    # A cheaper model for chapter notes, a stronger one for the book summary and questions
+    # (specification 9.1). Every model used needs a price in config/prices.json.
+    claude_model_fast: str = "claude-haiku-5-5"
+    claude_model_strong: str = "claude-sonnet-5-5"
+    # No new LLM call for a book that has already cost this much (FR-017). Temporary value, to be
+    # set after the first cost measurements.
+    book_cost_limit_usd: Decimal = Decimal("2.00")
+    # Parallel LLM requests in one worker process, over all its jobs.
+    llm_max_concurrency: int = 5
+    # One attempt of one LLM request; a call is tried up to 3 times.
+    llm_timeout_seconds: float = 180
 
     # Signs the session JWT (section 7.3). Must be overridden outside local development.
     jwt_secret: str = "change-me-local-only"

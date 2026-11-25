@@ -21,6 +21,7 @@ dependencies = [
     "beautifulsoup4>=4.12",  # EPUB XHTML (FR-003)
     "lxml>=5.2",  # parser backend for BeautifulSoup
     "pymupdf>=1.24",  # PDF text and layout (FR-003), used from A3
+    "anthropic>=2.14,<3",  # Claude API, async client (app.llm)
 ]
 
 [project.optional-dependencies]

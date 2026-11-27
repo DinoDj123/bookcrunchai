@@ -19,7 +19,9 @@ dependencies = [
     "email-validator>=2.2",  # EmailStr in request schemas
     # Parsing (Track A). EPUB is read with zipfile + BeautifulSoup/lxml, no EbookLib (Decision D1).
     "beautifulsoup4>=4.12",  # EPUB XHTML (FR-003)
-    "lxml>=5.2",  # parser backend for BeautifulSoup
+    # Below 6.2 until the EPUB reader works with it: with lxml 6.2.0 epub:type="footnote" content
+    # stays in the text (tests/parsing/test_epub.py).
+    "lxml>=5.2,<6.2",  # parser backend for BeautifulSoup
     "pymupdf>=1.24",  # PDF text and layout (FR-003), used from A3
 ]
 

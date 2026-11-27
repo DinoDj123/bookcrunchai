@@ -9,10 +9,7 @@ import { ContentsTab } from "@/components/book/ContentsTab";
 import { CostTab } from "@/components/book/CostTab";
 import { ProcessingStatus } from "@/components/book/ProcessingStatus";
 import { StatusBadge } from "@/components/book/StatusBadge";
-// TEMPORARY: when Track A's summary tab arrives, change this one line to
-//   import { SummaryTab } from "@/components/summary/SummaryTab";
-// and delete SummaryTabPlaceholder.tsx. Assumed props: <SummaryTab bookId={id} />.
-import { SummaryTab } from "@/components/book/SummaryTabPlaceholder";
+import { SummaryTab } from "@/components/summary/SummaryTab";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -191,7 +188,7 @@ export function BookView() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="summary">
-          <SummaryTab bookId={book.id} />
+          <SummaryTab bookId={book.id} bookReady={book.status === "ready"} />
         </TabsContent>
         <TabsContent value="contents">
           <ContentsTab bookId={book.id} />

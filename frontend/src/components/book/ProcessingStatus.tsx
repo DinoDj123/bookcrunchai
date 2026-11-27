@@ -6,8 +6,9 @@ import { Progress } from "@/components/ui/progress";
 import { type ActiveJob, type Book, isInProgress } from "@/lib/books";
 
 /** "chapter_notes" -> "Chapter notes". The stages are shown as the API names them; the page
- *  keeps no list of its own, so a stage added to the pipeline appears without a change here. */
-function stageLabel(job: ActiveJob | null): string {
+ *  keeps no list of its own, so a stage added to the pipeline appears without a change here.
+ *  Also used for the job that generates a summary (SummaryTab). */
+export function stageLabel(job: ActiveJob | null): string {
   if (job?.stage) {
     const words = job.stage.replaceAll("_", " ");
     return words.charAt(0).toUpperCase() + words.slice(1);

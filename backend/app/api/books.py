@@ -118,9 +118,13 @@ async def find_book(session: AsyncSession, owner_id: uuid.UUID, file_sha256: str
 
 
 async def existing_upload(session: AsyncSession, queue: ArqRedis, book: Book) -> UploadOut:
-    """The answer for a file this user already uploaded: the book and its latest job."""
+    """The answer for a file this user already uploaded: the book and its latest processing job
+    (not a summary job)."""
     job = await session.scalar(
-        select(Job).where(Job.book_id == book.id).order_by(Job.created_at.desc()).limit(1)
+        select(Job)
+        .where(Job.book_id == book.id, Job.type == JobType.PROCESS_BOOK)
+        .order_by(Job.created_at.desc())
+        .limit(1)
     )
     if job is not None and job.status == JobStatus.QUEUED:
         # Normally the job is already in the queue and this does nothing (same job ID). But if

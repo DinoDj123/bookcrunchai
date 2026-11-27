@@ -70,6 +70,24 @@ npm run dev                                          # http://localhost:3000, /a
 The backend reads `.env` from the folder it runs in; copy the root `.env` to `backend/.env`, or
 export the variables.
 
+## LLM
+
+The mentors provide no Claude API key and asked for open-source models (specification Appendix E).
+`backend/app/llm/` talks to any server with an OpenAI-compatible Chat Completions API, so the
+provider is configuration only (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL_FAST`,
+`LLM_MODEL_STRONG`, see `.env.example`):
+
+- **Locally:** [Ollama](https://ollama.com) on your machine, `ollama pull gemma3:4b` and
+  `ollama pull gemma3:12b`, with `OLLAMA_CONTEXT_LENGTH=32768` (the default context is too small
+  for a chapter). The containers reach it at `host.docker.internal:11434`.
+- **Demo host:** Railway has no GPUs, so the demo uses a hosted provider of open-weight models
+  (to be decided, specification 5.5).
+- Check the settings with one real call: `docker compose exec worker python scripts/llm_smoke.py`
+  (add `strong` for the strong model).
+
+Every model needs a line in `backend/config/prices.json`; models that cost nothing have price
+`"0"`, and token counts are recorded either way (FR-013).
+
 ## Checks (same as CI)
 
 ```bash
@@ -81,7 +99,7 @@ pytest                                   # includes tests/parsing/test_contract.
 npm run lint && npm run format:check && npm run typecheck && npm run build
 ```
 
-Automated tests never call paid APIs (Claude, Voyage); they use fakes. The API and worker tests
+Automated tests never call a real LLM or embedding service; they use fakes. The API and worker tests
 set `BOOKCRUNCH_PARSER=fake`, so they do not depend on the real parser; the parser has its own
 tests in `tests/parsing`, which run on the three test books in `tests/fixtures/books`.
 
@@ -104,11 +122,21 @@ All under `/api/v1`; the full reference is the OpenAPI page at `/api/v1/docs`.
 | `POST /auth/logout`, `GET /auth/me` | End the session; current user |
 | `POST /books` | Upload an EPUB or PDF (multipart field `file`, at most 50 MB): 202 with the book and its job, or 200 with the existing book if this user already uploaded the same file |
 | `POST /books/{id}/retry` | Process a failed book again: 202 with the book and its job, 409 `BOOK_NOT_FAILED` for a book that is being processed or is ready, 503 `QUEUE_UNAVAILABLE` if it cannot be queued now (the book stays `failed`) |
+| `GET /books` | The library: own books and demo books, newest first (`is_demo` tells them apart) |
+| `GET /books/{id}` | One book with `chapter_count`, `active_job` (the processing job to poll, or null; summary jobs are not included), `error_message` of a failed book and usage totals |
+| `GET /books/{id}/chapters` | Table of contents: `position`, `title`, `kind`, `word_count`, `has_notes` |
+| `GET /books/{id}/usage` | Tokens and estimated cost by pipeline step and in total; `cost_usd` is a decimal string |
+| `POST /books/{id}/summaries` | Body `{"length": "5min"\|"15min", "language": "en"\|"cnr"}`. 200 with the summary if it is ready (from the cache, no LLM cost); otherwise 202 with `summary` and the `job` to poll. A failed summary is queued again; 409 `BOOK_NOT_READY` before the book is processed; 503 `QUEUE_UNAVAILABLE` if Redis is down (the summary stays `queued` and the same request later starts it) |
+| `GET /books/{id}/summaries?length=&language=` | The summary in any state: `overview`, `chapters`, `key_ideas`, `word_count`, and while it is not ready its latest `job` (stage, progress, error); 404 `SUMMARY_NOT_FOUND` if never requested |
 | `GET /jobs/{id}` | Status, stage and progress of a job; poll it while the job runs |
 
 Rate limits (429 `RATE_LIMITED`, with `details.retry_after_seconds` and a `Retry-After` header):
-10 login attempts per minute per client address (`LOGIN_RATE_LIMIT`) and 20 processed books per
-hour per user (`UPLOAD_RATE_LIMIT`). A processed book is an upload that was stored or a retry; a
+10 login attempts and 5 registrations per minute per client address (`LOGIN_RATE_LIMIT`,
+`REGISTER_RATE_LIMIT`), 20 processed books per hour per user (`UPLOAD_RATE_LIMIT`) and 20 started
+summary jobs per hour per user (`SUMMARY_RATE_LIMIT`; a ready summary is never refused). The client
+address is the one Caddy saw; an `X-Forwarded-For` header sent by the client is not trusted.
+Another user's book answers 404 `BOOK_NOT_FOUND` on every book endpoint; demo books can be read
+by everyone and changed by no one. A processed book is an upload that was stored or a retry; a
 rejected file and a repeated upload of the same file are not counted.
 
 Try it with curl (the cookie is kept in `jar`):
@@ -125,11 +153,29 @@ Uploaded files are stored in `STORAGE_DIR` as `<book id>.epub` or `<book id>.pdf
 ## Background jobs
 
 The API saves a row in `jobs` and puts only its ID on the Redis queue (`app/worker/queue.py`); the
-worker (`app/worker/tasks.py`) reads the job and the book from PostgreSQL, runs the parser and
-writes status, chapters and errors back. PostgreSQL is the only place where job status lives.
+worker (`app/worker/tasks.py`) reads the job and the book from PostgreSQL, runs the pipeline and
+writes status, results and errors back. PostgreSQL is the only place where job status lives.
+
+`process_book` runs the stages **parsing → chunking → chapter notes**, then marks the book `ready`
+(embedding comes in week 3). `jobs.progress` is one percentage for the whole job: parsing ends at
+10 %, chunking at 20 %, the chapter notes fill the rest chapter by chapter.
+
+- Chapters and their chunks are stored together as soon as chunking is done, and every chapter's
+  notes as soon as they arrive. A retried job continues from there: a book that already has chunks
+  is not parsed again, and only chapters without notes get notes, so no LLM call is paid twice.
+- Chapter notes are written for front matter and chapters, not for back matter (proposal waiting
+  for Track A).
+- **Temporary:** chunking and chapter notes are fakes in `app/worker/pipeline_draft.py`
+  (`BOOKCRUNCH_CHUNKER=fake`, `BOOKCRUNCH_NOTES=fake`), built on the draft chunking contract that
+  Track A has not agreed yet. The fake notes make no LLM call. When Track A's code is merged, the
+  worker imports it from `app.pipeline` and the draft module is deleted.
 
 - A file the parser rejects (damaged, protected, scanned, not a book) fails the job at once with
-  the parser's error code; the book is marked `failed` too.
+  the parser's error code; the book is marked `failed` too. A chunker or notes code that breaks
+  its contract or crashes fails the job at once as well (`CHUNKER_…`, `NOTES_…` codes).
+- An LLM call that cannot succeed fails the job at once: `COST_LIMIT_EXCEEDED` (FR-017) or
+  `LLM_REQUEST_FAILED`. An LLM service that stays unavailable is retried like any other error and
+  ends as `LLM_UNAVAILABLE` after the last attempt.
 - Other errors (database, network) are retried by ARQ, 3 attempts in total, then the job and the
   book are marked `failed` with `INTERNAL_ERROR`. An attempt that died with the worker (killed,
   out of memory) counts too.
@@ -138,6 +184,27 @@ writes status, chapters and errors back. PostgreSQL is the only place where job 
   is started again only when ARQ's lock on it expires, about 10 minutes later.
 - With `BOOKCRUNCH_PARSER=fake`, set `FAKE_PARSER_DELAY=3` or `FAKE_PARSER_ERROR=NO_TEXT_LAYER` on
   the worker to see a slow or a failing job (`docs/contracts/parse_book.md`, section 6).
+
+`generate_summary` makes one book summary (FR-008) for one length and language, from the chapter
+notes, with the strong model (`LLM_MODEL_STRONG`); `job.params` names the summary. It runs only
+when `POST /books/{id}/summaries` asks for a summary that is not ready.
+
+- The result must have an overview, chapter summaries of known chapters (each at most once; a
+  chapter the model left out is accepted), 1,100 or 3,300 words ±15 % in all, and 5–10 or 10–15
+  key ideas. A key idea of an unknown chapter is dropped. An invalid result gets one more call,
+  then the job fails with `SUMMARY_INVALID`.
+- The summary, its chapter summaries and key ideas are stored in the commit that marks the job
+  done, so a summary is never half stored. A ready summary is never made again.
+- A failed job marks the summary `failed` and leaves the book `ready`; asking again starts a new
+  job. LLM errors are handled as for chapter notes; `fail_stale_jobs` covers summary jobs too.
+- Only the newest job of a summary writes or fails it. An old job that ARQ delivers again after
+  `fail_stale_jobs` failed it does nothing, so a summary is never paid for or stored twice.
+- Both reduce calls together have 480 s (`SUMMARY_TIMEOUT_SECONDS`), below ARQ's 600 s job
+  timeout; a slower model fails the job with `SUMMARY_TIMEOUT`.
+- **Temporary:** the reduce step is a fake (`BOOKCRUNCH_SUMMARY=fake`) that returns a summary of
+  exactly the target length from the notes' own words, without an LLM call. Track A writes the
+  real prompt (`write_book_summary` in the draft contract). `FAKE_SUMMARY_DELAY=5` makes the fake
+  wait, to see the job in the UI.
 
 ## Parsing
 
@@ -190,7 +257,8 @@ Result of uploading the three test books through the API and the worker (23.11.2
 
 ## Deployment
 
-One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`, a random `JWT_SECRET` (the API, the worker and the migrations refuse to start with the example value once `SITE_ADDRESS` is a domain) and `SITE_ADDRESS` to the domain in `.env`
+The mentors chose [Railway](https://railway.com) for the demo (specification 5.5); the Railway
+setup is being written. Until then, the steps for one Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`, a random `JWT_SECRET` (the API, the worker and the migrations refuse to start with the example value once `SITE_ADDRESS` is a domain) and `SITE_ADDRESS` to the domain in `.env`
 (Caddy then gets an HTTPS certificate), `docker compose up --build -d`,
 `docker compose run --rm api alembic upgrade head`.
 

@@ -1,8 +1,8 @@
 """ARQ worker. Run with: arq app.worker.settings.WorkerSettings
 
 The API enqueues a job ID in Redis (app.worker.queue); the worker reads the job's input from
-PostgreSQL and writes progress and results back there (specification section 5.4).
-generate_summary is added in a later task.
+PostgreSQL and writes progress and results back there (specification section 5.4). Two tasks:
+process_book (parse, chunk, chapter notes) and generate_summary (one book summary).
 """
 
 from typing import Any
@@ -12,7 +12,13 @@ from arq.connections import RedisSettings
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.worker.tasks import JOB_TIMEOUT_SECONDS, MAX_TRIES, fail_stale_jobs, process_book
+from app.worker.tasks import (
+    JOB_TIMEOUT_SECONDS,
+    MAX_TRIES,
+    fail_stale_jobs,
+    generate_summary,
+    process_book,
+)
 
 
 async def ping(_ctx: dict[str, Any]) -> str:
@@ -27,7 +33,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
 
 
 class WorkerSettings:
-    functions = [process_book, ping]
+    functions = [process_book, generate_summary, ping]
     cron_jobs = [cron(fail_stale_jobs, minute=set(range(0, 60, 5)), run_at_startup=True)]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     on_startup = on_startup

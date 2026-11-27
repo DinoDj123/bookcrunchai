@@ -1,12 +1,13 @@
-"""Rate limits (specification 4.2: login, upload and question endpoints).
+"""Rate limits (specification 4.2: login, upload and question endpoints, and starting summaries).
 
 A fixed window counted in Redis: the first request creates a counter that expires when the window
 ends, every counted request adds one, and a request over the limit gets 429 RATE_LIMITED. Redis is
 shared by all API processes, so the limit holds with several of them.
 
-Login counts every attempt. Upload counts only the work that was really started (a stored book or
-a retry): the limit is checked before the request body is read, and the counter is raised after
-the book is queued. A rejected file or a repeated upload of the same file costs the user nothing.
+Login and registration count every attempt. Upload counts only the work that was really started
+(a stored book or a retry): the limit is checked before the request body is read, and the counter
+is raised after the book is queued. A rejected file or a repeated upload of the same file costs
+the user nothing.
 """
 
 import logging
@@ -17,12 +18,15 @@ from arq.connections import ArqRedis
 from fastapi import Depends, Request
 
 from app.api.deps import CurrentUser, SettingsDep
+from app.core.config import Settings
 from app.core.errors import AppError
 
 logger = logging.getLogger(__name__)
 
 LOGIN_WINDOW_SECONDS = 60
+REGISTER_WINDOW_SECONDS = 60
 UPLOAD_WINDOW_SECONDS = 60 * 60
+SUMMARY_WINDOW_SECONDS = 60 * 60
 
 
 class RequestCounter:
@@ -92,13 +96,31 @@ async def _count(
         return 0, 1
 
 
+def client_address(request: Request) -> str:
+    """The browser's address. The API is reachable only through Caddy, which replaces any
+    X-Forwarded-For the client sent with the address it saw; uvicorn runs with --proxy-headers
+    (docker-compose.yml) and puts that address here. So a client cannot pick its own counter by
+    sending the header itself."""
+    return request.client.host if request.client else "unknown"
+
+
 async def limit_logins(request: Request, counter: CounterDep, settings: SettingsDep) -> None:
     """Per client address, failed or not: slows down password guessing. Not per email, because
     then anyone could lock another user out by guessing at their address."""
-    # Behind Caddy, uvicorn runs with --proxy-headers, so this is the browser's address.
-    address = request.client.host if request.client else "unknown"
-    count, seconds_left = await _count(counter, "login", address, LOGIN_WINDOW_SECONDS, add=True)
+    count, seconds_left = await _count(
+        counter, "login", client_address(request), LOGIN_WINDOW_SECONDS, add=True
+    )
     if count > settings.login_rate_limit:
+        raise rate_limited(seconds_left)
+
+
+async def limit_registrations(request: Request, counter: CounterDep, settings: SettingsDep) -> None:
+    """Per client address, successful or not: keeps a script from filling the database with
+    accounts, each of which costs a password hash and gets its own upload limit."""
+    count, seconds_left = await _count(
+        counter, "register", client_address(request), REGISTER_WINDOW_SECONDS, add=True
+    )
+    if count > settings.register_rate_limit:
         raise rate_limited(seconds_left)
 
 
@@ -119,3 +141,20 @@ async def limit_uploads(user: CurrentUser, counter: CounterDep, settings: Settin
 async def count_upload(counter: RequestCounter, user_id: uuid.UUID) -> None:
     """Count one started processing (a new book, or a retry of a failed one) for the user."""
     await _count(counter, "upload", str(user_id), UPLOAD_WINDOW_SECONDS, add=True)
+
+
+async def limit_summaries(counter: RequestCounter, settings: Settings, user_id: uuid.UUID) -> None:
+    """Per user: every summary job started is paid LLM work, and a summary that keeps failing (or
+    one of a demo book, whose cost limit all its readers share) could otherwise be requested
+    without end. Called only when a new job would start, so a ready summary is never refused;
+    count_summary() does the counting."""
+    count, seconds_left = await _count(
+        counter, "summary", str(user_id), SUMMARY_WINDOW_SECONDS, add=False
+    )
+    if count >= settings.summary_rate_limit:
+        raise rate_limited(seconds_left)
+
+
+async def count_summary(counter: RequestCounter, user_id: uuid.UUID) -> None:
+    """Count one started summary job for the user."""
+    await _count(counter, "summary", str(user_id), SUMMARY_WINDOW_SECONDS, add=True)

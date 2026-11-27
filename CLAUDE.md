@@ -38,7 +38,9 @@ Read `docs/contracts/parse_book.md` before touching parsing or the worker.
 
 - Python 3.12 with type hints, Ruff; TypeScript strict, ESLint, Prettier.
 - Never commit secrets: keys only in `.env` (git-ignored); document variables in `.env.example`.
-- Never call paid APIs (Claude, embeddings) in automated tests; use fakes.
+- Never call a real LLM or embedding service in automated tests; use fakes. The models are
+  open-weight models behind an OpenAI-compatible API (`backend/app/llm/`), not the Claude API:
+  the mentors provide no Claude key (specification Appendix E).
 - Small, meaningful commits on feature branches (`feat/...`, `fix/...`); merge by pull request
   reviewed by the other developer.
 - Record significant design decisions and rejected alternatives in the specification or README.

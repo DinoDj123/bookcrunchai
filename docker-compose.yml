@@ -11,6 +11,10 @@ x-backend: &backend
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     REDIS_URL: redis://redis:6379/0
     STORAGE_DIR: /data/storage
+    # Ollama on the developer's machine unless .env names another server (.env.example).
+    LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+  extra_hosts:
+    - "host.docker.internal:host-gateway"  # Linux; Docker Desktop has this name already
   volumes:
     - book_files:/data/storage
   depends_on:

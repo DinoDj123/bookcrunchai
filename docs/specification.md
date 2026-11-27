@@ -1,8 +1,8 @@
-# bookcrunch.ai — Software Specification v1.5 (Markdown copy)
+# bookcrunch.ai — Software Specification v1.6 (Markdown copy)
 
-Team Bookcrunch.ai · Daris Velović, Dino Đerekerac · Mentors: Ana Pješivac, Tamara Pavlović · 23.11.2026
+Team Bookcrunch.ai · Daris Velović, Dino Đerekerac · Mentors: Ana Pješivac, Tamara Pavlović · 27.11.2026
 
-> This is a text copy of `bookcrunch_software_specification_v1.5.docx` so that Claude Code can read it.
+> This is a text copy of `bookcrunch_software_specification_v1.6.docx` so that Claude Code can read it.
 > The Word document is the official version sent to the mentors; diagrams and wireframes are only there.
 > When the Word document changes, regenerate this file.
 
@@ -50,7 +50,8 @@ This document covers the following aspects of the system:
 | UI                       | User Interface                                                                                                         |
 | DB                       | Database                                                                                                               |
 | MVP                      | Minimum Viable Product: the Must Have scope defined in the project brief                                               |
-| LLM                      | Large Language Model (here: Claude models accessed through the Claude API)                                             |
+| LLM                      | Large Language Model (here: open-weight models such as Gemma, Qwen or Llama, accessed through an OpenAI-compatible API) |
+| Open-weight model        | A model whose weights are published under an open licence, so anyone can run it (locally or at a hosting provider)      |
 | RAG                      | Retrieval-Augmented Generation: the model answers from passages retrieved from the book instead of from its own memory |
 | EPUB                     | Electronic publication format; a ZIP archive of XHTML documents with a table of contents                               |
 | TOC                      | Table of Contents                                                                                                      |
@@ -74,7 +75,7 @@ This document covers the following aspects of the system:
 | Students                                       | Use chapter summaries and cited answers to study a required text and need to find the exact passage behind an answer.                         |
 | Development team (2 full-stack developers)     | Design, build, test, deploy and present the system; both members must be able to explain every part of it.                                    |
 | Mentor                                         | Approves the specification and any change of stack, follows weekly progress, evaluates the final result.                                      |
-| DevelopersLab, Coinis (AI-DEV 2026 organisers) | Run the programme and define the evaluation criteria and required artefacts.                                                                  |
+| DevelopersLab, Coinis (AI-DEV 2026 organisers) | Run the programme and define the evaluation criteria and required artefacts. Coinis would provide further infrastructure if development continues after the programme. |
 | Authors and publishers (indirect)              | Their copyright must be respected: uploaded books stay private to the uploader and the shared demo library contains only public-domain books. |
 
 ## 2.2 User Roles and Personas
@@ -144,7 +145,7 @@ Reader and Student are two personas of the same technical role (an authenticated
 | **ID**           | FR-001                                                                                                                                                                                           |
 | **Title**        | User registration and login                                                                                                                                                                      |
 | **Description**  | A visitor can create an account with email and password, log in and log out. All book features require an authenticated user.                                                                    |
-| **Priority**     | Must Have (authentication method to be confirmed with the mentor, see Appendix E)                                                                                                                |
+| **Priority**     | Must Have (authentication method confirmed by the mentors, see Appendix E)                                                                                                                       |
 | **Input**        | Email, password (minimum 8 characters).                                                                                                                                                          |
 | **Processing**   | Email is normalised to lower case and must be unique. The password is hashed with Argon2id and never stored or logged in plain text. On login the API issues a signed JWT in an httpOnly cookie. |
 | **Output**       | Account created; session cookie set; user redirected to the library. Wrong credentials return a generic “Invalid email or password” message.                                                     |
@@ -263,7 +264,7 @@ Reader and Student are two personas of the same technical role (an authenticated
 | **Description**  | Every chunk is embedded so that passages relevant to a question can be found.                                                                                                                                                                                                |
 | **Priority**     | Must Have                                                                                                                                                                                                                                                                    |
 | **Input**        | Chunks of a book.                                                                                                                                                                                                                                                            |
-| **Processing**   | Chunks are sent to the embedding API in batches. Vectors (1,024 dimensions) are stored in PostgreSQL with pgvector and searched with cosine distance. A multilingual embedding model is used so that a question in Montenegrin can retrieve passages from a book in English. |
+| **Processing**   | Chunks are sent to the embedding service in batches. Vectors (1,024 dimensions) are stored in PostgreSQL with pgvector and searched with cosine distance. A multilingual open-source embedding model (BAAI bge-m3) is used so that a question in Montenegrin can retrieve passages from a book in English. |
 | **Output**       | Embedding stored for each chunk; token usage recorded.                                                                                                                                                                                                                       |
 | **Dependencies** | FR-006, FR-013                                                                                                                                                                                                                                                               |
 
@@ -301,8 +302,8 @@ Reader and Student are two personas of the same technical role (an authenticated
 | **Title**        | Token and cost tracking                                                                                                                                                                                                                                                                         |
 | **Description**  | The system records tokens used and estimated cost for every book.                                                                                                                                                                                                                               |
 | **Priority**     | Must Have                                                                                                                                                                                                                                                                                       |
-| **Input**        | Usage data returned by the Claude API and the embedding API.                                                                                                                                                                                                                                    |
-| **Processing**   | Every API call writes one usage record: book, job, pipeline step, model, input tokens, output tokens and estimated cost. Cost is calculated from a price table kept in configuration (price per million input and output tokens for each model), so prices can be updated without code changes. |
+| **Input**        | Usage data returned by the LLM and the embedding service.                                                                                                                                                                                                                                       |
+| **Processing**   | Every model call writes one usage record: book, job, pipeline step, model, input tokens, output tokens and estimated cost. Cost is calculated from a price table kept in configuration (price per million input and output tokens for each model), so prices can be updated without code changes. A model that costs nothing (run locally or on a free tier) has price 0; its tokens are still recorded. |
 | **Output**       | Per-book totals (tokens and estimated cost in USD), broken down by step, shown in the Cost tab and returned by the API.                                                                                                                                                                         |
 | **Dependencies** | FR-007, FR-008, FR-010, FR-011                                                                                                                                                                                                                                                                  |
 
@@ -409,7 +410,7 @@ Reader and Student are two personas of the same technical role (an authenticated
 <td><strong>Exceptions</strong></td>
 <td><p>Unsupported type or file too large: rejected before upload completes, with a message.</p>
 <p>Scanned PDF without a text layer: job fails with an explanation that OCR is not supported.</p>
-<p>Claude or embedding API unavailable: automatic retries, then the job is marked failed and can be retried; completed steps are kept.</p></td>
+<p>LLM or embedding service unavailable: automatic retries, then the job is marked failed and can be retried; completed steps are kept.</p></td>
 </tr>
 </tbody>
 </table>
@@ -569,7 +570,7 @@ Reader and Student are two personas of the same technical role (an authenticated
 
 # 4. Non-Functional Requirements
 
-The figures below are initial targets. They will be compared with measurements in Week 2 and Week 3 and corrected here if they prove unrealistic.
+The figures below are initial targets. They will be compared with measurements in Week 2 and Week 3 and corrected here if they prove unrealistic. The LLM timings depend strongly on where the open-weight models run (Section 5.5) and were set when a hosted Claude model was planned; they are the first figures to re-check.
 
 ## 4.1 Performance
 
@@ -601,9 +602,9 @@ The figures below are initial targets. They will be compared with measurements i
 
 - **Secrets:** API keys and the JWT secret only in environment variables; .env is git-ignored and .env.example documents the variables. No secrets, book text or personal data in logs.
 
-- **Transport:** HTTPS in the deployed environment; CORS limited to the application origin.
+- **Transport:** HTTPS in the deployed environment (terminated by Railway); CORS limited to the application origin.
 
-- **Abuse limits:** rate limits on login, upload and question endpoints.
+- **Abuse limits:** rate limits on login, registration, upload, summary and question endpoints. Login and registration are limited per client address (10 and 5 per minute), upload and started summary jobs per user (20 per hour each). The address is the one the proxy saw; a forwarding header sent by the client is not trusted.
 
 - **Privacy and copyright:** uploaded books are processed only for the uploading user and are never shared; the demo library contains only public-domain books.
 
@@ -617,7 +618,7 @@ The MVP targets a demo with a small number of concurrent users on a single host.
 
 - Supported browsers: current versions of Chrome, Firefox, Edge and Safari.
 
-- Interface language: English in the MVP. Summary and answer language: English or Montenegrin, selected by the user.
+- Interface language: English in the MVP (confirmed by the mentors). Summary and answer language: English or Montenegrin, selected by the user.
 
 - Accessibility basics following WCAG 2.1 AA: sufficient contrast, keyboard navigation, visible focus, labels on all form fields.
 
@@ -637,7 +638,7 @@ The MVP targets a demo with a small number of concurrent users on a single host.
 
 - No formal uptime target for the MVP; the deployed application must be available for the mentor check-ins and the final demo.
 
-- Daily database dump on the demo host; uploaded files are kept on a persistent volume.
+- Daily database dump of the demo database; uploaded files are kept on a persistent Railway volume.
 
 ## 4.6 Maintainability
 
@@ -679,12 +680,12 @@ This pattern was chosen because the team has two developers and four weeks. One 
 | Backend API      | Authentication, validation, ownership checks, book and summary endpoints, question answering, queuing of jobs, OpenAPI documentation.                          | Python, FastAPI, Pydantic, SQLAlchemy                 |
 | Worker           | Runs the pipeline: parse → chunk → embed → chapter notes, and summary generation; retries; progress updates; usage records.                                    | Python, ARQ                                           |
 | Parsing module   | EPUB and PDF text extraction, clean-up and chapter detection; returns a ParsedBook. No dependency on the web framework or the database.                        | zipfile, BeautifulSoup (lxml), PyMuPDF                |
-| LLM client       | One wrapper for all Claude API calls: prompts, retries, structured output validation, recording of tokens and cost.                                            | Anthropic Python SDK                                  |
-| Retrieval module | Embedding of chunks and questions, vector search, citation verification.                                                                                       | Voyage AI API, pgvector                               |
+| LLM client       | One wrapper for all LLM calls: prompts, retries, structured output validation, recording of tokens and cost. Talks to any OpenAI-compatible server, so the provider is configuration. | OpenAI Python SDK; Ollama locally, a hosted provider of open-weight models on the demo host |
+| Retrieval module | Embedding of chunks and questions, vector search, citation verification.                                                                                       | BAAI bge-m3 (open source) through an OpenAI-compatible embeddings endpoint, pgvector |
 | Database         | Users, books, chapters, chunks with embeddings, summaries, questions, citations, jobs and usage.                                                               | PostgreSQL with pgvector                              |
 | Job queue        | Holds queued jobs between the API and the worker.                                                                                                              | Redis                                                 |
-| File storage     | Uploaded book files, private per user.                                                                                                                         | Local disk volume                                     |
-| Reverse proxy    | HTTPS termination; routes page requests to the frontend and /api requests to the backend, so both share one origin.                                            | Caddy                                                 |
+| File storage     | Uploaded book files, private per user.                                                                                                                         | Docker volume locally, Railway volume on the demo host |
+| Reverse proxy    | Routes page requests to the frontend and /api requests to the backend, so both share one origin. Locally it also serves HTTP; on Railway, Railway terminates HTTPS in front of it. | Caddy                                                 |
 
 ## 5.4 Communication and Integration
 
@@ -694,23 +695,25 @@ This pattern was chosen because the team has two developers and four weeks. One 
 
 - **API ↔ worker:** the API writes a job row to PostgreSQL and enqueues the job ID in Redis; the worker reads its input from the database and writes results and progress back to it. PostgreSQL is the single source of truth for job status.
 
-- **Claude API:** HTTPS through the official SDK. Structured results (summary, answer with citations) are requested as JSON and validated with Pydantic before they are stored.
+- **LLM:** the OpenAI Chat Completions API, spoken by Ollama, vLLM and the hosting providers of open-weight models, through the OpenAI Python SDK with a configurable base URL. Structured results (summary, answer with citations) are requested as JSON and validated with Pydantic before they are stored.
 
-- **Embedding API:** HTTPS, batched requests for chunks, a single request for a question.
+- **Embeddings:** the OpenAI-compatible embeddings endpoint of the server that runs bge-m3; batched requests for chunks, a single request for a question.
 
 - **Parser contract:** parse_book(file_path) → ParsedBook. The worker depends only on this function, which lets parsing and platform work proceed in parallel.
 
 ## 5.5 Deployment Architecture
 
-All services run as Docker containers defined in one Docker Compose file: proxy, frontend, api, worker, postgres (with pgvector) and redis. The same file is used for local development and for the demo host, with different environment files.
+Locally, all services run as Docker containers defined in one Docker Compose file: proxy, frontend, api, worker, postgres (with pgvector) and redis. The demo runs on Railway (https://railway.com), as proposed by the mentors; Coinis would provide further infrastructure if development continues after the programme. The same Docker images are used in both places.
 
-- **Environments:** local development on each developer’s machine, and one production (demo) environment. A separate staging environment is not planned.
+- **Environments:** local development on each developer’s machine, and one production (demo) environment on Railway. A separate staging environment is not planned.
 
-- **Hosting:** one Linux virtual machine. The provider is an open question for the mentor (Appendix E).
+- **Railway services (proposed, to be confirmed by the team):** proxy (Caddy, the only service with a public domain), frontend, backend, PostgreSQL with pgvector (Railway template) and Redis, connected over Railway’s private network. Keeping Caddy keeps one origin for the frontend and the API, so the session cookie needs no cross-site configuration (7.3). The API and the worker run in **one** backend service, because a Railway volume can be attached to only one service, and the worker must read the files the API stores. Alternatives are listed in Appendix D.
 
-- **CI/CD:** GitHub Actions runs linting and tests on every pull request. Deployment in the MVP is a documented manual step on the host (pull, build, migrate, restart); automatic deployment is optional.
+- **Where the models run:** Railway offers no GPUs, and running an LLM on its CPUs would take far longer than the targets in 4.1. The demo therefore uses a hosted provider of open-weight models through its OpenAI-compatible API (provider still to be chosen, Appendix E); during development each developer can use Ollama locally. Free tiers have low limits (for example 8,000 tokens per minute and 200,000 tokens per day for the large models on Groq in November 2026), so the demo books are processed in advance and served from the cache (FR-014). The bge-m3 embedding model is small enough to run on a CPU, for example in Ollama as one more Railway service.
 
-- **Database migrations:** Alembic, executed as part of the deployment step.
+- **CI/CD:** GitHub Actions runs linting and tests on every pull request. Railway builds and deploys from the GitHub repository.
+
+- **Database migrations:** Alembic, executed as part of each deployment.
 
 - **Early deployment:** the skeleton is deployed by the end of Week 2 so that deployment problems are found long before the demo.
 
@@ -874,7 +877,7 @@ A background job.
 
 ### llm_usage
 
-One record per external API call; the basis for cost reporting.
+One record per model call (LLM or embeddings); the basis for token and cost reporting.
 
 | **Attribute** | **Type**      | **Constraints**                  | **Description**                         |
 |---------------|---------------|----------------------------------|-----------------------------------------|
@@ -1019,6 +1022,17 @@ Details of the main endpoints:
 </tbody>
 </table>
 
+| **Field** | **Value** |
+|--|--|
+| **Endpoint** | GET /api/v1/books |
+| **Description** | The library: the user’s own books and the demo books, newest first. |
+| **Auth Required** | Yes – session cookie |
+| **Path Parameters** | None |
+| **Query Parameters** | None |
+| **Request Body** | N/A |
+| **Success Response** | 200 OK – { books: [ { id, title, author, file_format, status, error_code, word_count, is_demo, created_at } ] } |
+| **Error Responses** | 401 UNAUTHENTICATED |
+
 | **Field**            | **Value**                                                                                                                                                                                             |
 |----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Endpoint**         | GET /api/v1/books/{id}                                                                                                                                                                                |
@@ -1027,8 +1041,30 @@ Details of the main endpoints:
 | **Path Parameters**  | id: UUID – book ID                                                                                                                                                                                    |
 | **Query Parameters** | None                                                                                                                                                                                                  |
 | **Request Body**     | N/A                                                                                                                                                                                                   |
-| **Success Response** | 200 OK – { id, title, author, source_language, file_format, status, error_code, chapters_detected, chapter_count, word_count, is_demo, active_job, usage: { input_tokens, output_tokens, cost_usd } } |
+| **Success Response** | 200 OK – { id, title, author, source_language, file_format, status, error_code, error_message, chapters_detected, chapter_count, word_count, is_demo, active_job, usage: { input_tokens, output_tokens, cost_usd } }. active_job is { id, type, status, stage, progress } for a queued or running job, otherwise null. error_message is the message of the failed job, null unless the status is failed. cost_usd is a decimal string ("0.032000") here and in /usage. |
 | **Error Responses**  | 401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND (also for books of other users)                                                                                                                               |
+
+| **Field** | **Value** |
+|--|--|
+| **Endpoint** | GET /api/v1/books/{id}/chapters |
+| **Description** | Table of contents in reading order. Empty until the book has been parsed. |
+| **Auth Required** | Yes – session cookie |
+| **Path Parameters** | id: UUID – book ID |
+| **Query Parameters** | None |
+| **Request Body** | N/A |
+| **Success Response** | 200 OK – { chapters: [ { position, title, kind, word_count, has_notes } ] }. kind is chapter, front_matter or back_matter; has_notes tells whether the chapter notes exist. |
+| **Error Responses** | 401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND (also for books of other users) |
+
+| **Field** | **Value** |
+|--|--|
+| **Endpoint** | GET /api/v1/books/{id}/usage |
+| **Description** | Tokens and estimated cost of the book by pipeline step and in total (FR-013). |
+| **Auth Required** | Yes – session cookie |
+| **Path Parameters** | id: UUID – book ID |
+| **Query Parameters** | None |
+| **Request Body** | N/A |
+| **Success Response** | 200 OK – { steps: [ { step, input_tokens, output_tokens, cost_usd } ], total: { input_tokens, output_tokens, cost_usd } }. step is map, reduce, embed or qa; only steps with at least one call are listed. |
+| **Error Responses** | 401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND (also for books of other users) |
 
 | **Field**            | **Value**                                                                                                                                                                                                                                                                                                     |
 |----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1079,15 +1115,26 @@ Details of the main endpoints:
 </tr>
 <tr class="odd">
 <td><strong>Success Response</strong></td>
-<td><p>200 OK – { id, status: "ready", length, language, overview, chapters: [ { chapter_position, title, content } ], key_ideas: [ { text, chapter_position } ], word_count } when cached</p>
-<p>202 Accepted – { summary: { id, status }, job: { id, status } } when generation was queued</p></td>
+<td><p>200 OK – { id, status: "ready", length, language, overview, chapters: [ { chapter_position, title, content } ], key_ideas: [ { text, chapter_position } ], word_count, job: null } when cached</p>
+<p>202 Accepted – { summary: { id, status }, job: { id, status } } when generation was queued or is already running; a failed summary is queued again with a new job</p></td>
 </tr>
 <tr class="even">
 <td><strong>Error Responses</strong></td>
-<td>401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND, 409 BOOK_NOT_READY, 422 VALIDATION_ERROR</td>
+<td>401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND, 409 BOOK_NOT_READY, 422 VALIDATION_ERROR, 429 RATE_LIMITED (20 summary jobs started per hour per user; a ready summary is never refused), 503 QUEUE_UNAVAILABLE (the summary and its job stay queued; the same request later hands the job to the queue)</td>
 </tr>
 </tbody>
 </table>
+
+| **Field**            | **Value**                                                                                                                                                                                                 |
+|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Endpoint**         | GET /api/v1/books/{id}/summaries                                                                                                                                                                          |
+| **Description**      | Read the summary for a length and language in any state (queued, running, ready, failed).                                                                                                                |
+| **Auth Required**    | Yes – session cookie                                                                                                                                                                                      |
+| **Path Parameters**  | id: UUID – book ID                                                                                                                                                                                        |
+| **Query Parameters** | length: "5min" \| "15min"; language: "en" \| "cnr" (both required)                                                                                                                                         |
+| **Request Body**     | N/A                                                                                                                                                                                                       |
+| **Success Response** | 200 OK – the body of POST’s 200 answer. Until the summary is ready, overview and word_count are null, chapters and key_ideas are empty, and job is its latest job { id, status, stage, progress, error_code, error_message } |
+| **Error Responses**  | 401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND, 404 SUMMARY_NOT_FOUND, 422 VALIDATION_ERROR                                                                                                                       |
 
 | **Field**            | **Value**                                                                                                                                  |
 |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1113,7 +1160,7 @@ Details of the main endpoints:
 
 ## 7.3 Authentication and Authorization
 
-**Status: proposed, to be confirmed with the mentor (Appendix E).**
+**Status: confirmed by the mentors (Appendix E).**
 
 1.  Registration: POST /auth/register validates the input (email, password of 8 to 128 characters), stores the user with an Argon2id password hash and logs the user in: 201 Created with { id, email } and the session cookie; 409 EMAIL_TAKEN if the email is already registered.
 
@@ -1181,7 +1228,7 @@ Screens marked \[auth\] require a logged-in user; an unauthenticated request is 
 
 # 9. Technology Stack
 
-The stack follows the one suggested in the project brief. Versions are the major versions planned at the time of writing; exact versions are pinned in the lock files of the repository.
+The stack follows the one suggested in the project brief, except for the LLM: the brief names the Claude API, but the mentors provide no Claude key and asked for open-source models (Appendix E). Versions are the major versions planned at the time of writing; exact versions are pinned in the lock files of the repository.
 
 | **Layer**          | **Technology**                            | **Version**       | **Justification**                                                                                                                                   |
 |--------------------|-------------------------------------------|-------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1191,15 +1238,15 @@ The stack follows the one suggested in the project brief. Versions are the major
 | Validation         | Pydantic                                  | 2.x               | Request validation and validation of structured LLM output.                                                                                         |
 | Database           | PostgreSQL + pgvector                     | 17 / 0.8          | Relational data and vector search in one database; one service fewer than a dedicated vector store.                                                 |
 | ORM and migrations | SQLAlchemy + Alembic                      | 2.x / 1.x         | Standard for FastAPI; versioned schema migrations.                                                                                                  |
-| Job queue          | ARQ + Redis                               | 0.26+ / 7.x       | Small async queue with retries; fits async FastAPI and the async Claude client.                                                                     |
+| Job queue          | ARQ + Redis                               | 0.26+ / 7.x       | Small async queue with retries; fits async FastAPI and the async LLM client.                                                                        |
 | EPUB parsing       | zipfile + BeautifulSoup + lxml            | – / 4.x / 5.x     | Reads the package (OPF), spine and navigation from the archive; XHTML to clean text. EbookLib is not used (Appendix D).                             |
-| PDF parsing        | PyMuPDF                                   | 1.24+             | Text with position and font size, needed to remove headers and footers and to detect headings. Licence note in Appendix E.                          |
-| LLM                | Claude API (Anthropic Python SDK)         | current           | Required by the brief. A smaller, cheaper model for chapter notes and a stronger model for the book summary and Q&A; model names are configuration. |
-| Embeddings         | Voyage AI (voyage-4 family)               | 1,024 dimensions  | Multilingual, so Montenegrin questions work on English books; Anthropic does not provide an embedding model.                                        |
-| Auth               | JWT (PyJWT) + Argon2id                    | –                 | Stateless authentication; modern password hashing. To be confirmed with the mentor.                                                                 |
+| PDF parsing        | PyMuPDF                                   | 1.24+             | Text with position and font size, needed to remove headers and footers and to detect headings. AGPL licence accepted by the mentors (Appendix E).   |
+| LLM                | Open-weight models through an OpenAI-compatible API (OpenAI Python SDK); Ollama locally | current | The mentors asked for open-source models. A smaller model for chapter notes and a stronger model for the book summary and Q&A; model names, server address and key are configuration. Gemma 3 (4B and 12B) are the starting defaults; the final models are chosen after a test of Montenegrin output in Week 2–3. |
+| Embeddings         | BAAI bge-m3                               | 1,024 dimensions  | Open source and multilingual, so Montenegrin questions work on English books; small enough to run on a CPU; same vector size as planned, so the schema does not change. |
+| Auth               | JWT (PyJWT) + Argon2id                    | –                 | Stateless authentication; modern password hashing. Confirmed by the mentors.                                                                        |
 | Testing            | pytest, Vitest, Playwright                | –                 | Unit and integration tests for the backend; component tests; one end-to-end happy path.                                                             |
 | Code quality       | Ruff, ESLint, Prettier                    | –                 | Consistent style, checked in CI.                                                                                                                    |
-| DevOps             | Docker Compose, GitHub Actions, Caddy     | –                 | Same setup locally and on the demo host; CI on every pull request; automatic HTTPS.                                                                 |
+| DevOps             | Docker Compose, GitHub Actions, Caddy, Railway | –            | Same images locally and on the demo host; CI on every pull request; Railway proposed by the mentors for hosting, with HTTPS included.                |
 | Version Control    | Git + GitHub                              | –                 | Feature branches, pull requests and review.                                                                                                         |
 
 # 10. Testing Strategy
@@ -1209,12 +1256,12 @@ The stack follows the one suggested in the project brief. Versions are the major
 | **Level**               | **Scope**                                                                                                                         | **Tools**                                             | **Responsibility**                        |
 |-------------------------|-----------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------|-------------------------------------------|
 | Unit Tests              | Critical logic: EPUB and PDF clean-up, chapter detection, chunking, cost calculation, citation verification, summary validation.  | pytest; Vitest for frontend helpers                   | The developer who writes the module       |
-| Integration             | API endpoints with a test database; full pipeline with the Claude and embedding APIs replaced by fakes; ownership rules; caching. | pytest, FastAPI TestClient, test PostgreSQL in Docker | Both developers, each for their endpoints |
+| Integration             | API endpoints with a test database; full pipeline with the LLM and embedding services replaced by fakes; ownership rules; caching. | pytest, FastAPI TestClient, test PostgreSQL in Docker | Both developers, each for their endpoints |
 | E2E Tests               | One happy path through the UI: log in → upload → summary → question → open citation.                                              | Playwright                                            | Daris Velović (written in Week 3–4)       |
-| Manual                  | Exploratory testing of the UI; checking Montenegrin output; processing of the three test books with real API calls.               | Checklist in the repository                           | Both developers                           |
+| Manual                  | Exploratory testing of the UI; checking Montenegrin output; processing of the three test books with real model calls.             | Checklist in the repository                           | Both developers                           |
 | Faithfulness evaluation | Manual check of sampled summary claims against the source (FR-016).                                                               | Sampling script, spreadsheet                          | Dino Đerekerac leads, both label          |
 
-Automated tests never call the paid APIs. Real API calls are made only in manual runs and in the evaluation, and their cost is recorded.
+Automated tests never call a real LLM or embedding service. Real model calls are made only in manual runs and in the evaluation, and their tokens and cost are recorded.
 
 **Test books (public domain):**
 
@@ -1244,7 +1291,7 @@ Automated tests never call the paid APIs. Real API calls are made only in manual
 | TC-014      | FR-011          | Question answered by the book                                     | Answer with at least one citation; every quote found in its chunk       | Pending    |
 | TC-015      | FR-011          | Question the book cannot answer                                   | answerable = false; no invented answer; no citations                    | Pending    |
 | TC-016      | FR-011          | Model returns a quote that is not in the chunk (fake)             | Citation rejected; unsupported statement removed                        | Pending    |
-| TC-017      | FR-012          | Claude API fails three times during processing (fake)             | Job and book marked failed; retry continues from the last finished step | Pending    |
+| TC-017      | FR-012          | LLM service fails three times during processing (fake)            | Job and book marked failed; retry continues from the last finished step | Pending    |
 | TC-018      | FR-013          | Known token counts and price table                                | Correct cost per call and per book                                      | Pending    |
 | TC-019      | FR-015          | User B requests a book of user A                                  | 404 BOOK_NOT_FOUND                                                      | Pending    |
 | TC-020      | FR-015          | User tries to delete a demo book                                  | Request rejected; book unchanged                                        | Pending    |
@@ -1276,7 +1323,8 @@ The project is complete and ready for demonstration when all of the following ar
 | M1: Specification and parsing (Week 1) | This document approved by the mentor; repository and project skeleton; EPUB and PDF parsing with chapter detection on 3 test books; data model; job queue.                 | 20.11.2026      |
 | M2: Summarisation pipeline (Week 2)    | Main flow works end to end (happy path): chunking, chapter notes, book summary with length and language options, caching, cost tracking; first deployment of the skeleton. | 27.11.2026      |
 | M3: Q&A with citations (Week 3)        | Embeddings and retrieval; grounded answers with verified citations; summary UI with links from key ideas to chapters; failure paths; automated tests for critical logic.   | 04.12.2026      |
-| M4: Evaluation and demo (Week 4)       | Faithfulness evaluation and short report; UX polish; deployed application; README; 10-minute presentation and live demo.                                                   | 11.12.2026      |
+| M4: Evaluation and demo (Week 4)       | Faithfulness evaluation and short report; UX polish; deployed application on Railway; README. Feature freeze on 11.12.2026; after it only fixes and rehearsal.               | 11.12.2026      |
+| Final presentation                     | 10-minute presentation and live demo on the deployed application.                                                                                                          | 14.12.2026, around 18:00 |
 
 ## 11.2 Team Responsibilities
 
@@ -1284,8 +1332,8 @@ Both members are full-stack developers. Work is split into two tracks that touch
 
 | **Member**     | **Primary Role**                   | **Key Responsibilities**                                                                                                                                                                                                                                                                                                                                             |
 |----------------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Dino Đerekerac | Track A: document and LLM pipeline | Week 1: EPUB and PDF parsing, chapter detection, parser tests. Week 2: chunking, chapter notes, prompts. Week 3: embeddings, retrieval, grounded Q&A, citation verification. Week 4: faithfulness evaluation and report. Specification sections 1, 2, 3, 8, 10.                                                                                                      |
-| Daris Velović  | Track B: platform, API and UI      | Week 1: repository skeleton, Docker Compose, data model and migrations, job queue, upload and status. Week 2: LLM client with usage recording, caching, summary endpoints and UI, first deployment. Week 3: Q&A and reader UI with clickable citations, failure paths, end-to-end test. Week 4: deployment, README, UX polish. Specification sections 4, 5, 6, 7, 9. |
+| Dino Đerekerac | Track A: document and LLM pipeline | Week 1: EPUB and PDF parsing, chapter detection, parser tests. Week 2: chunking, chapter notes, prompts, choice of the open-weight models (test of Montenegrin output). Week 3: embeddings, retrieval, grounded Q&A, citation verification. Week 4: faithfulness evaluation and report. Specification sections 1, 2, 3, 8, 10.                                                                                                      |
+| Daris Velović  | Track B: platform, API and UI      | Week 1: repository skeleton, Docker Compose, data model and migrations, job queue, upload and status. Week 2: LLM client with usage recording, caching, summary endpoints and UI, first deployment on Railway. Week 3: Q&A and reader UI with clickable citations, failure paths, end-to-end test. Week 4: deployment, README, UX polish. Specification sections 4, 5, 6, 7, 9. |
 | Both           | Shared                             | Parser contract, weekly integration, code review, weekly progress report, sections 11–12, final presentation and demo.                                                                                                                                                                                                                                               |
 
 ## 11.3 Risk Assessment
@@ -1294,11 +1342,13 @@ Both members are full-stack developers. Work is split into two tracks that touch
 |----------------------------------------------------|-----------------|------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Summaries contain claims the book does not support | High            | High       | Prompts restricted to the provided text; summaries built only from chapter notes; faithfulness measured in Week 4 and reported honestly; unsupported examples analysed. |
 | Messy PDFs break parsing or chapter detection      | High            | Medium     | Three varied test books from Week 1; fallback to fixed-size parts; EPUB as the primary demo format; limitations documented.                                             |
-| LLM cost higher than expected                      | Medium          | Medium     | Caching from the start; cheaper model for the map step; cost recorded per call; cost cap per book; fakes in automated tests.                                            |
+| Open-weight models summarise less faithfully than the planned Claude models | Medium | High | Models compared on the test books in Week 2–3 before the final choice; the strongest available model for the reduce step and Q&A; citations verified by the backend (FR-011); faithfulness measured and reported honestly. |
+| No usable place to run the models for the demo (Railway has no GPU; free tiers have low limits) | High | High | Provider-independent client (any OpenAI-compatible server); provider question raised with the mentors; demo books processed in advance and cached; requests throttled to the provider’s limits; Ollama on a developer machine as a fallback for processing. |
+| LLM cost higher than expected (if a paid provider is used) | Low | Medium | Caching from the start; smaller model for the map step; cost recorded per call; cost cap per book; fakes in automated tests. |
 | Scope creep (stretch goals started too early)      | High            | Medium     | Stretch goals only after the Definition of Done is met; weekly check against this document with the mentor.                                                             |
-| Claude or embedding API rate limits or outage      | Medium          | High       | Retries with back-off; limited concurrency; resumable jobs; demo books processed in advance and cached.                                                                 |
-| Weak or inconsistent Montenegrin output            | Medium          | Medium     | Explicit language instructions in the prompt; both members review Montenegrin summaries; examples included in the evaluation.                                           |
-| Deployment problems close to the demo              | Medium          | High       | Skeleton deployed in Week 2; same Docker Compose setup locally and on the host.                                                                                         |
+| LLM or embedding service rate limits or outage     | High            | High       | Retries with back-off; limited concurrency; resumable jobs; demo books processed in advance and cached.                                                                 |
+| Weak or inconsistent Montenegrin output            | High            | Medium     | Models chosen with a Montenegrin test; explicit language instructions in the prompt; both members review Montenegrin summaries; examples included in the evaluation.    |
+| Deployment problems close to the demo              | Medium          | High       | Skeleton deployed on Railway in Week 2; same Docker images locally and on Railway; feature freeze on 11.12.2026, three days before the presentation.                     |
 | Team member unavailable                            | Medium          | High       | Clear contracts between tracks; pull-request reviews keep both members familiar with all code; weekly tracker shows blockers early.                                     |
 | Copyright issues with uploaded books               | Low             | High       | Uploads private to the uploader; demo library only public domain; no public launch without legal review.                                                                |
 
@@ -1312,6 +1362,7 @@ Both members are full-stack developers. Work is split into two tracks that touch
 | 1.3 | 21.11.2026 | Daris Velović | Job queue implemented: parser failures fail a job at once, other errors are retried up to 3 attempts (Appendix C); decisions on job retries and job results (Appendix D) |
 | 1.4 | 21.11.2026 | Daris Velović | Authentication, upload and job status implemented: register response and EMAIL_TAKEN, cookie name and Secure rule (7.3); 503 QUEUE_UNAVAILABLE on upload (7.1, 7.2); books.file_path is relative to the storage directory (6.2); decisions on upload without a queue and on the login answer (Appendix D) |
 | 1.5 | 23.11.2026 | Daris Velović, Dino Đerekerac | parse_book contract 1.1: a book without a metadata title keeps the uploaded file name as its title (6.2); decision on the book title (Appendix D). EPUB files are read with zipfile and BeautifulSoup instead of EbookLib (5.3, 9, Appendix B; decision in Appendix D) |
+| 1.6 | 27.11.2026 | Daris Velović | Mentors’ answers recorded (Appendix E). Open-weight models through an OpenAI-compatible API instead of the Claude API, and bge-m3 instead of Voyage AI for embeddings (1.4, FR-010, FR-013, 5.3, 5.4, 9, 10, Appendix D). Hosting on Railway (4.2, 4.5, 5.3, 5.5). Authentication, PyMuPDF licence, evaluation sample size and English interface confirmed (FR-001, 4.4, 7.3, 9). Final presentation on 14.12.2026 and feature freeze on 11.12.2026 (11.1). New and changed risks (11.3) |
 
 # Appendices
 
@@ -1342,9 +1393,13 @@ Both members are full-stack developers. Work is split into two tracks that touch
 
 - Planet eBook, source of the PDF test book: https://www.planetebook.com
 
-- Claude API documentation: https://docs.claude.com
+- OpenAI API reference (Chat Completions, the API spoken by the model servers): https://platform.openai.com/docs/api-reference
 
-- Voyage AI embeddings documentation: https://docs.voyageai.com
+- Ollama documentation (local models, OpenAI compatibility): https://docs.ollama.com
+
+- BAAI bge-m3 embedding model: https://huggingface.co/BAAI/bge-m3
+
+- Railway documentation: https://docs.railway.com
 
 - FastAPI documentation: https://fastapi.tiangolo.com
 
@@ -1376,7 +1431,7 @@ Sequence for a question (FR-011):
 
 3.  The API embeds the question and reads the 8 nearest chunks of the book from pgvector.
 
-4.  The API sends the question and the numbered passages to the Claude API.
+4.  The API sends the question and the numbered passages to the LLM.
 
 5.  The API validates the structured answer and verifies every quote against its chunk.
 
@@ -1393,32 +1448,44 @@ Significant decisions and the alternatives that were rejected.
 | Back-end structure | Modular monolith plus one worker                                          | Microservices: too much overhead for two developers. Pipeline inside the request: lost on timeout or restart.                                                             |
 | Job queue          | ARQ with Redis                                                            | Celery: more configuration than the project needs. FastAPI background tasks: no retries, jobs lost on restart. RQ: synchronous and does not run natively on Windows.      |
 | Vector storage     | pgvector in PostgreSQL                                                    | Dedicated vector store: one more service to run and keep in sync, with no benefit at this data size.                                                                      |
-| Embedding model    | Hosted multilingual model (Voyage AI)                                     | English-only model: Montenegrin questions would not match English passages. Local model: no API cost, but a larger image and more memory on the host. Kept as a fallback. |
+| Embedding model    | Open-source multilingual model BAAI bge-m3 (1,024 dimensions), served through an OpenAI-compatible embeddings endpoint | English-only model: Montenegrin questions would not match English passages. Voyage AI (chosen in 1.0–1.5): a paid API, and the mentors asked for open-source models. multilingual-e5-large: also 1,024 dimensions, kept as a fallback. Loading the model inside the API and the worker (sentence-transformers): a much larger image and the model in memory twice. |
 | Summarisation      | Chapter notes once per book, then one reduce step per length and language | Summarising the chapters again for every length and language: several times the cost. Whole book in one request: too large and too costly, and less reliable.             |
-| Models             | Cheaper model for chapter notes, stronger model for reduce and Q&A        | Strongest model everywhere: higher cost for the step with the most tokens. To be revisited with the faithfulness results.                                                 |
-| Citations          | Model returns chunk number and verbatim quote; backend verifies the quote | Trusting citations without checking: a wrong citation is worse than none. The built-in citations feature of the Claude API will be evaluated in Week 3 as an alternative. |
-| Authentication     | Email and password, JWT in httpOnly cookie (to be confirmed)              | Anonymous sessions: simpler, but private books would be tied to one browser. Token in local storage: readable by scripts.                                                 |
+| Models             | Smaller model for chapter notes, stronger model for reduce and Q&A        | Strongest model everywhere: slower, and higher cost or rate-limit use for the step with the most tokens. To be revisited with the faithfulness results.                   |
+| LLM provider       | Open-weight models through the OpenAI-compatible Chat Completions API (OpenAI Python SDK with a configurable base URL): Ollama locally, a hosted provider for the demo | Claude API (versions 1.0–1.5): the mentors provide no key and asked for open-source models. A provider-specific SDK: ties the code to one provider whose free tier may not be enough. Running the model inside the worker (transformers, llama.cpp): a very large image, and Railway has no GPU. |
+| Citations          | Model returns chunk number and verbatim quote; backend verifies the quote | Trusting citations without checking: a wrong citation is worse than none. (The built-in citations feature of the Claude API, planned as an alternative, is no longer available with open-weight models.) |
+| Authentication     | Email and password, JWT in httpOnly cookie (confirmed by the mentors)     | Anonymous sessions: simpler, but private books would be tied to one browser. Token in local storage: readable by scripts.                                                 |
 | Caching scope      | Per user and book                                                         | Sharing results between users who upload the same file: saves cost but complicates the privacy rules.                                                                     |
-| File storage       | Local disk volume                                                         | Object storage (S3): unnecessary for a single-host demo.                                                                                                                  |
+| Summary generation | POST /books/{id}/summaries saves the summary as “queued” and a generate_summary job; the worker runs the reduce step, validates the result (one more call if it is invalid) and stores overview, chapter summaries and key ideas in one commit. A ready summary is answered from the database. The row is created with INSERT … ON CONFLICT DO NOTHING and then locked, so two requests at once make one summary and one job. A failed summary is queued again with a new job and leaves the book ready; only the newest job of a summary may write or fail it (an old job that comes back after being failed as stale does nothing). If the queue cannot be reached, the summary and its job stay queued and the next request hands the job to the queue. The reduce step has its own time limit (480 s, below the 600 s job timeout). Every reader of a demo book can request its summaries, which all its readers share; started summary jobs are limited per user (20 per hour), because a failing summary could otherwise be requested without end and use up the cost limit of a shared demo book | Generating inside the request: a reduce call on an open-weight model can take minutes and would be lost on a timeout. Generating all four summaries in process_book: four times the reduce cost for combinations nobody may ask for. Re-queuing the failed job under its own ID: the queue may still hold that ID, and the failed job is the record of what went wrong. Demo summaries only from the team: the demo would need a separate admin step. Removing the summary and job when the queue cannot be reached (as for uploads): another request may already have handed the same job to the queue, so the removal could delete a job that is about to run. |
+| File storage       | Local disk volume (a Railway volume on the backend service)               | Object storage (S3): one more service and client library for a small demo. Files in PostgreSQL: changes the upload, the worker and the data model, and makes the database much larger. |
 | Status updates     | Polling                                                                   | WebSockets or server-sent events: more moving parts for little gain.                                                                                                      |
-| Deployment         | Docker Compose on one host                                                | Split hosting (frontend on a platform, backend elsewhere): two deployments and cross-origin cookies.                                                                      |
+| Deployment         | Railway, as proposed by the mentors: Caddy as the only public service in front of the frontend and the backend; API and worker in one backend service that owns the volume (proposed, to be confirmed by the team) | One Linux VM with Docker Compose (versions 1.0–1.5): replaced by the mentors’ choice. Frontend and API on separate public Railway domains: cross-origin cookies. API and worker as separate Railway services: a volume can be attached to one service only, so the worker could not read the uploaded files. |
 | Enumerated values  | VARCHAR columns with CHECK constraints; allowed values in Python enums    | PostgreSQL ENUM types: adding a value needs ALTER TYPE in a migration. No database check at all: invalid values would only be caught by the application.                 |
 | Same-book links | book_id plus composite foreign keys, for example (chapter_id, book_id) → chapters (id, book_id) | Check in the application only: a bug could link a citation or key idea to another user’s book and show its text (privacy, FR-015). Database trigger: harder to read and test than a foreign key. |
 | Job retries | Parser failures (unsupported, damaged, protected or scanned file, parser bug, parser running over 5 minutes) fail the job at once; other errors (database, network) are retried by ARQ, 3 attempts in total. A scheduled task fails jobs left “running” by a worker that died, so a book never stays in “processing” (4.5) | Retrying every failure 3 times: the same file fails the same way, so the user would only wait longer for the same message. Own retry loop in the task: repeats what ARQ does and does not survive a worker restart. |
 | Job results | Kept only in PostgreSQL; ARQ stores no result in Redis (keep_result = 0) and the ARQ job ID is the job’s UUID | Keeping ARQ results: a second copy of the status, and a kept result blocks queuing the same job ID again, which retrying a failed job needs. |
+| LLM client | One wrapper (app.llm) for every LLM call, through the OpenAI SDK to any OpenAI-compatible server. It retries by itself, 3 attempts with 2 s and 4 s back-off on 429, 5xx and timeouts, with the SDK’s own retries switched off; a rejected request (other 4xx) or a refusal (refusal text or finish reason content_filter) is not retried. After each successful call it writes the llm_usage row in its own transaction; a server that returns no token counts is recorded with zero tokens. A reasoning model’s thinking at the start of the text (&lt;think&gt;…&lt;/think&gt;) is removed. Before each call it sums the book’s recorded cost and refuses with COST_LIMIT_EXCEEDED at or over BOOK_COST_LIMIT_USD; calls already in flight are not counted, so a book can pass the limit by at most LLM_MAX_CONCURRENCY calls. A model without a price in backend/config/prices.json (0 for a free model) is refused before the call. Failures reach the worker as LLMError with a code (COST_LIMIT_EXCEEDED, LLM_UNAVAILABLE, LLM_REQUEST_FAILED) and a retryable flag | SDK retries: not visible in our code and not testable without a network. Usage written in the job’s transaction: lost when the job fails, although the money is spent. Reserving cost before a call so the limit is exact: needs an estimate of output tokens and locking for a temporary limit. Fallback to another model on refusal: complicates cost records and makes results depend on which model answered. |
 | Upload when the queue is down | The book, its job and the stored file are removed and the API answers 503 QUEUE_UNAVAILABLE; the user uploads again | Keeping the book with a job nobody will run: it would stay “uploaded” forever, and uploading the file again would only return that stuck book (FR-014). Enqueuing before the database commit: the worker could look for a job that is not saved yet. |
 | Login answer | The same 401 INVALID_CREDENTIALS for an unknown email and a wrong password, and a password hash is checked in both cases | Separate messages or a faster answer for unknown emails: would reveal which addresses have an account. |
 | Book title without metadata | The parser reports `title_from_metadata = False` and the worker keeps the title set at upload (the cleaned original file name) | Parser falls back to the stored file name: files are stored as `<uuid>.<ext>`, so the title would be a UUID. Passing the original file name to `parse_book()`: changes the function's signature (contract 2.0) for a value the database already has. |
 | EPUB reading | Python’s zipfile module and BeautifulSoup with the lxml parser read the package file, the spine and the navigation directly | EbookLib (named in versions 1.0–1.4): no control over which error becomes which parser error code, no help with the element-level anchors that chapter splitting needs, and one more dependency under the AGPL licence for about 80 lines of package and navigation reading. |
 
-## E. Open Questions for the Mentor
+## E. Questions for the Mentor
+
+Answered by the mentors on 27.11.2026:
+
+| **\#** | **Question**                                                                                                       | **Answer**                                                                                                           |
+|--------|--------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| 1      | Is email and password login with JWT the expected approach, or is a simpler way of identifying users acceptable?   | Yes, email and password login with JWT stays (7.3).                                                                  |
+| 2      | Where should the application be deployed, and is a server provided?                                                | Railway (https://railway.com). Coinis would provide further infrastructure if development continues after the programme (5.5). |
+| 3      | Are API keys and a budget provided for the Claude API? Is a second paid API (Voyage AI) acceptable for embeddings? | No Claude API key is provided; use open-source models (5.3, 9, Appendix D).                                          |
+| 4      | PyMuPDF is licensed under AGPL. Is that acceptable for this project?                                               | Yes, acceptable for this project. A public launch would still need a licence review.                                 |
+| 5      | Is a sample of at least 25 claims per book enough for the faithfulness evaluation?                                 | Yes, 25 claims per book and language is enough (FR-016).                                                             |
+| 6      | Are the milestone dates in 11.1 correct, and when is the final demo?                                               | Final presentation on 14.12.2026, around 18:00 (11.1).                                                               |
+| 7      | Is an English-only interface acceptable if summaries and answers are available in Montenegrin?                     | Yes, an English-only interface is fine for the MVP (4.4).                                                            |
+
+Open:
 
 | **\#** | **Question**                                                                                                       | **Current assumption**                                                                                               |
 |--------|--------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| 1      | Is email and password login with JWT the expected approach, or is a simpler way of identifying users acceptable?   | Email and password with JWT, as described in 7.3                                                                     |
-| 2      | Where should the application be deployed, and is a server provided?                                                | One Linux virtual machine with Docker Compose                                                                        |
-| 3      | Are API keys and a budget provided for the Claude API? Is a second paid API (Voyage AI) acceptable for embeddings? | Team uses provided keys; Voyage AI for embeddings, local model as fallback                                           |
-| 4      | PyMuPDF is licensed under AGPL. Is that acceptable for this project?                                               | Acceptable for an educational project; a public launch would need a licence review. Alternative: pypdf or pdfplumber |
-| 5      | Is a sample of at least 25 claims per book enough for the faithfulness evaluation?                                 | 25 claims per book and language, 3 books                                                                             |
-| 6      | Are the milestone dates in 11.1 correct, and when is the final demo?                                               | Weekly milestones from 20.11.2026 to 11.12.2026                                                                      |
-| 7      | Is an English-only interface acceptable if summaries and answers are available in Montenegrin?                     | English interface in the MVP                                                                                         |
+| 8      | Railway has no GPUs, so the models must run at a hosting provider of open-weight models (for example Groq, OpenRouter or Together), whose free tiers allow about one book per day. Is a small budget or a provider key available, or should the team stay on free tiers? | Free tiers; demo books processed in advance and cached; Ollama on a developer machine as a fallback for processing |
+| 9      | Who pays for the Railway usage during the programme (trial credit, team account, or a Coinis account)?             | The team starts on a trial or Hobby account; the mentors are told the expected monthly cost                          |

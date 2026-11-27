@@ -603,7 +603,7 @@ The figures below are initial targets. They will be compared with measurements i
 
 - **Transport:** HTTPS in the deployed environment; CORS limited to the application origin.
 
-- **Abuse limits:** rate limits on login, upload and question endpoints.
+- **Abuse limits:** rate limits on login, registration, upload and question endpoints. Login and registration are limited per client address (10 and 5 per minute), upload per user. The address is the one the proxy saw; a forwarding header sent by the client is not trusted.
 
 - **Privacy and copyright:** uploaded books are processed only for the uploading user and are never shared; the demo library contains only public-domain books.
 
@@ -1019,6 +1019,17 @@ Details of the main endpoints:
 </tbody>
 </table>
 
+| **Field** | **Value** |
+|--|--|
+| **Endpoint** | GET /api/v1/books |
+| **Description** | The library: the user’s own books and the demo books, newest first. |
+| **Auth Required** | Yes – session cookie |
+| **Path Parameters** | None |
+| **Query Parameters** | None |
+| **Request Body** | N/A |
+| **Success Response** | 200 OK – { books: [ { id, title, author, file_format, status, error_code, word_count, is_demo, created_at } ] } |
+| **Error Responses** | 401 UNAUTHENTICATED |
+
 | **Field**            | **Value**                                                                                                                                                                                             |
 |----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Endpoint**         | GET /api/v1/books/{id}                                                                                                                                                                                |
@@ -1027,8 +1038,30 @@ Details of the main endpoints:
 | **Path Parameters**  | id: UUID – book ID                                                                                                                                                                                    |
 | **Query Parameters** | None                                                                                                                                                                                                  |
 | **Request Body**     | N/A                                                                                                                                                                                                   |
-| **Success Response** | 200 OK – { id, title, author, source_language, file_format, status, error_code, chapters_detected, chapter_count, word_count, is_demo, active_job, usage: { input_tokens, output_tokens, cost_usd } } |
+| **Success Response** | 200 OK – { id, title, author, source_language, file_format, status, error_code, error_message, chapters_detected, chapter_count, word_count, is_demo, active_job, usage: { input_tokens, output_tokens, cost_usd } }. active_job is { id, type, status, stage, progress } for a queued or running job, otherwise null. error_message is the message of the failed job, null unless the status is failed. cost_usd is a decimal string ("0.032000") here and in /usage. |
 | **Error Responses**  | 401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND (also for books of other users)                                                                                                                               |
+
+| **Field** | **Value** |
+|--|--|
+| **Endpoint** | GET /api/v1/books/{id}/chapters |
+| **Description** | Table of contents in reading order. Empty until the book has been parsed. |
+| **Auth Required** | Yes – session cookie |
+| **Path Parameters** | id: UUID – book ID |
+| **Query Parameters** | None |
+| **Request Body** | N/A |
+| **Success Response** | 200 OK – { chapters: [ { position, title, kind, word_count, has_notes } ] }. kind is chapter, front_matter or back_matter; has_notes tells whether the chapter notes exist. |
+| **Error Responses** | 401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND (also for books of other users) |
+
+| **Field** | **Value** |
+|--|--|
+| **Endpoint** | GET /api/v1/books/{id}/usage |
+| **Description** | Tokens and estimated cost of the book by pipeline step and in total (FR-013). |
+| **Auth Required** | Yes – session cookie |
+| **Path Parameters** | id: UUID – book ID |
+| **Query Parameters** | None |
+| **Request Body** | N/A |
+| **Success Response** | 200 OK – { steps: [ { step, input_tokens, output_tokens, cost_usd } ], total: { input_tokens, output_tokens, cost_usd } }. step is map, reduce, embed or qa; only steps with at least one call are listed. |
+| **Error Responses** | 401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND (also for books of other users) |
 
 | **Field**            | **Value**                                                                                                                                                                                                                                                                                                     |
 |----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

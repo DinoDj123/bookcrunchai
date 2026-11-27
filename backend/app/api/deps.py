@@ -1,15 +1,17 @@
 """Dependencies shared by the routers."""
 
+import uuid
 from typing import Annotated
 
 from arq.connections import ArqRedis
 from fastapi import Depends, Request
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.core.security import read_session_token
-from app.db.models import User
+from app.db.models import Book, User
 from app.db.session import get_session
 
 SESSION_COOKIE = "session"
@@ -37,3 +39,22 @@ def get_queue(request: Request) -> ArqRedis:
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 QueueDep = Annotated[ArqRedis, Depends(get_queue)]
+
+
+async def get_readable_book(book_id: uuid.UUID, user: CurrentUser, session: SessionDep) -> Book:
+    """The book of a /books/{book_id}/... request, if this user may read it: their own book or a
+    demo book (FR-015). Ownership is part of the query, so another user's book is simply not
+    found and the answer does not reveal that it exists (specification 4.2).
+
+    For reading only. An endpoint that changes a book must also check that the user owns it:
+    demo books are read-only.
+    """
+    book = await session.scalar(
+        select(Book).where(Book.id == book_id, or_(Book.owner_id == user.id, Book.is_demo))
+    )
+    if book is None:
+        raise AppError(404, "BOOK_NOT_FOUND", "Book not found.")
+    return book
+
+
+ReadableBook = Annotated[Book, Depends(get_readable_book)]

@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_JWT_SECRET_LENGTH = 32
@@ -13,16 +13,26 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     environment: str = "local"  # local | production
-    # What the proxy serves (Caddyfile): ":80" locally, the domain name on the demo host.
+    # What the proxy serves (proxy/Caddyfile): ":80" locally. On Railway the backend service sets
+    # ENVIRONMENT=production instead (docs/deploy.md).
     site_address: str = ":80"
 
-    # postgresql+asyncpg://user:password@host:5432/dbname
+    # postgresql+asyncpg://user:password@host:5432/dbname. A plain postgresql:// URL, as Railway
+    # gives it, is accepted too and gets the asyncpg driver.
     database_url: str = "postgresql+asyncpg://bookcrunch:bookcrunch@localhost:5432/bookcrunch"
     redis_url: str = "redis://localhost:6379/0"
 
+    @field_validator("database_url")
+    @classmethod
+    def use_the_asyncpg_driver(cls, value: str) -> str:
+        for plain in ("postgresql://", "postgres://"):
+            if value.startswith(plain):
+                return "postgresql+asyncpg://" + value.removeprefix(plain)
+        return value
+
     # Uploaded book files (FR-002). A Docker volume in Compose.
     storage_dir: str = "./storage"
-    # Largest accepted book file (FR-002). The proxy has the same limit (Caddyfile).
+    # Largest accepted book file (FR-002). The proxy has the same limit (proxy/Caddyfile).
     max_upload_bytes: int = 50 * 1024 * 1024
 
     # Rate limits (section 4.2, app.api.rate_limit): login attempts per client address per minute,

@@ -1,0 +1,37 @@
+# One origin for the browser: /api goes to FastAPI, everything else to Next.js (section 5.3).
+# The same file runs in Docker Compose and on Railway (docs/deploy.md); only the variables differ.
+#
+# SITE_ADDRESS: ":80" locally (plain HTTP). On Railway ":8080": Railway's edge terminates HTTPS
+# and sends plain HTTP to this port.
+# API_UPSTREAM / FRONTEND_UPSTREAM: the Compose service names by default; on Railway the private
+# network names (backend.railway.internal:8000, frontend.railway.internal:3000).
+# TRUSTED_PROXIES / CLIENT_IP_HEADER: where the client's address comes from, for the rate limits.
+# Locally the defaults. On Railway every request comes through Railway's edge, which replaces
+# X-Real-IP with the client's address, so there TRUSTED_PROXIES is "0.0.0.0/0 ::/0" and
+# CLIENT_IP_HEADER is "X-Real-IP".
+{
+	servers {
+		trusted_proxies static {$TRUSTED_PROXIES:private_ranges}
+		client_ip_headers {$CLIENT_IP_HEADER:X-Forwarded-For}
+	}
+}
+
+{$SITE_ADDRESS::80} {
+	encode gzip
+
+	# Uploads are limited to 50 MB (section 6.3); a little headroom for the multipart envelope.
+	request_body {
+		max_size 51MB
+	}
+
+	handle /api/* {
+		reverse_proxy {$API_UPSTREAM:api:8000} {
+			# Exactly one address, the client's, so the API's rate limits count per client.
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+
+	handle {
+		reverse_proxy {$FRONTEND_UPSTREAM:frontend:3000}
+	}
+}

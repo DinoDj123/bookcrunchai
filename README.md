@@ -190,9 +190,11 @@ Result of uploading the three test books through the API and the worker (23.11.2
 
 ## Deployment
 
-One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`, a random `JWT_SECRET` (the API, the worker and the migrations refuse to start with the example value once `SITE_ADDRESS` is a domain) and `SITE_ADDRESS` to the domain in `.env`
-(Caddy then gets an HTTPS certificate), `docker compose up --build -d`,
-`docker compose run --rm api alembic upgrade head`.
+Railway, as the mentors proposed: Caddy as the only public service in front of the frontend and
+one backend service that runs the API and the worker together (a Railway volume can be attached to
+one service only), plus PostgreSQL with pgvector and Redis. Every merge to `main` deploys. The
+setup, the variables, troubleshooting and backups are in [docs/deploy.md](docs/deploy.md). Not
+deployed yet.
 
 ## Design decisions
 

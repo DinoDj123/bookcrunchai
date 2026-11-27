@@ -38,6 +38,14 @@ def test_local_addresses_count_as_local_development(site_address: str) -> None:
     assert Settings(_env_file=None, site_address=site_address).is_local is True
 
 
+@pytest.mark.parametrize("scheme", ["postgresql", "postgres", "postgresql+asyncpg"])
+def test_database_url_always_uses_the_asyncpg_driver(scheme: str) -> None:
+    """Railway's DATABASE_URL starts with postgresql://, which SQLAlchemy opens with psycopg2."""
+    settings = Settings(_env_file=None, database_url=f"{scheme}://u:p@db.railway.internal:5432/d")
+
+    assert settings.database_url == "postgresql+asyncpg://u:p@db.railway.internal:5432/d"
+
+
 def test_production_is_never_local() -> None:
     settings = Settings(_env_file=None, environment="production", jwt_secret="k" * 48)
 

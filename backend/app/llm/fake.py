@@ -44,5 +44,5 @@ class FakeLLMClient:
             input_tokens=0,
             output_tokens=0,
             cost_usd=Decimal(0),
-            stop_reason="end_turn",
+            stop_reason="stop",
         )

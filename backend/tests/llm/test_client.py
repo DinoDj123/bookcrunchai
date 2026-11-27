@@ -1,4 +1,4 @@
-"""AnthropicLLMClient with the SDK replaced by a stand-in: usage and cost records (FR-013,
+"""OpenAICompatibleLLMClient with the SDK replaced by a stand-in: usage and cost records (FR-013,
 TC-018), the cost limit (FR-017) and retries (specification 4.5)."""
 
 import asyncio
@@ -12,15 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import Book, Job, LlmUsage, UsageStep
 from app.llm import LLMError, LLMErrorCode
-from app.llm.client import AnthropicLLMClient
+from app.llm.client import OpenAICompatibleLLMClient
 from app.llm.pricing import ModelPrice
-from tests.llm.conftest import FakeSdk, message, status_error, timeout_error
+from tests.llm.conftest import FakeSdk, completion, status_error, timeout_error
 
 pytestmark = pytest.mark.anyio
 
 MODEL = "test-model"
 PRICES = {MODEL: ModelPrice(Decimal("2.00"), Decimal("10.00"))}
-# 1,000 input and 200 output tokens (the default of message()) at the prices above.
+# 1,000 input and 200 output tokens (the default of completion()) at the prices above.
 COST_OF_DEFAULT_CALL = Decimal("0.004000")
 
 
@@ -42,8 +42,8 @@ def make_client(
     job_id: uuid.UUID | None = None,
     cost_limit: str = "2.00",
     sleep: Sleeps | None = None,
-) -> AnthropicLLMClient:
-    return AnthropicLLMClient(
+) -> OpenAICompatibleLLMClient:
+    return OpenAICompatibleLLMClient(
         sdk=sdk,  # type: ignore[arg-type]
         session_factory=session_factory,
         book_id=book.id,
@@ -55,7 +55,7 @@ def make_client(
     )
 
 
-async def complete(client: AnthropicLLMClient, **overrides: Any) -> Any:
+async def complete(client: OpenAICompatibleLLMClient, **overrides: Any) -> Any:
     arguments: dict[str, Any] = {
         "step": UsageStep.MAP,
         "model": MODEL,
@@ -80,14 +80,14 @@ async def test_successful_call_returns_the_text_and_records_one_usage_row(
     job = Job(id=uuid.uuid4(), book_id=book.id, type="process_book", status="running")
     session.add(job)
     await session.flush()
-    sdk = FakeSdk([message("chapter notes", input_tokens=12_000, output_tokens=800)])
+    sdk = FakeSdk([completion("chapter notes", input_tokens=12_000, output_tokens=800)])
 
     result = await complete(make_client(sdk, session_factory, book, job_id=job.id))
 
     assert result.text == "chapter notes"
     assert (result.input_tokens, result.output_tokens) == (12_000, 800)
     assert result.cost_usd == Decimal("0.032000")
-    assert result.stop_reason == "end_turn"
+    assert result.stop_reason == "stop"
     [row] = await usage_rows(session, book)
     assert (row.job_id, row.step, row.model) == (job.id, "map", MODEL)
     assert (row.input_tokens, row.output_tokens) == (12_000, 800)
@@ -97,7 +97,7 @@ async def test_successful_call_returns_the_text_and_records_one_usage_row(
 async def test_request_carries_the_prompts_model_and_max_tokens(
     session_factory: async_sessionmaker[AsyncSession], book: Book
 ) -> None:
-    sdk = FakeSdk([message()])
+    sdk = FakeSdk([completion()])
 
     await complete(make_client(sdk, session_factory, book))
 
@@ -105,10 +105,45 @@ async def test_request_carries_the_prompts_model_and_max_tokens(
         {
             "model": MODEL,
             "max_tokens": 500,
-            "system": "Summarise the chapter.",
-            "messages": [{"role": "user", "content": "Chapter text"}],
+            "messages": [
+                {"role": "system", "content": "Summarise the chapter."},
+                {"role": "user", "content": "Chapter text"},
+            ],
         }
     ]
+
+
+async def test_thinking_before_the_answer_is_removed(
+    session_factory: async_sessionmaker[AsyncSession], book: Book
+) -> None:
+    """Reasoning models on some servers put their thinking in the text; only the answer counts."""
+    sdk = FakeSdk([completion("<think>\nThe chapter is about...\n</think>\n\nChapter notes.")])
+
+    result = await complete(make_client(sdk, session_factory, book))
+
+    assert result.text == "Chapter notes."
+
+
+async def test_missing_usage_is_recorded_as_zero_tokens(
+    session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], book: Book
+) -> None:
+    sdk = FakeSdk([completion("notes", with_usage=False)])
+
+    result = await complete(make_client(sdk, session_factory, book))
+
+    assert (result.input_tokens, result.output_tokens, result.cost_usd) == (0, 0, Decimal(0))
+    [row] = await usage_rows(session, book)
+    assert (row.input_tokens, row.output_tokens) == (0, 0)
+
+
+async def test_answer_cut_off_at_max_tokens_is_returned_with_its_reason(
+    session_factory: async_sessionmaker[AsyncSession], book: Book
+) -> None:
+    sdk = FakeSdk([completion("half of the no", finish_reason="length")])
+
+    result = await complete(make_client(sdk, session_factory, book))
+
+    assert (result.text, result.stop_reason) == ("half of the no", "length")
 
 
 async def test_book_total_is_the_sum_of_its_calls(
@@ -117,9 +152,9 @@ async def test_book_total_is_the_sum_of_its_calls(
     """TC-018: correct cost per call and per book."""
     sdk = FakeSdk(
         [
-            message(input_tokens=12_000, output_tokens=800),  # 0.032
-            message(input_tokens=500_000, output_tokens=0),  # 1.000
-            message(input_tokens=0, output_tokens=3_300),  # 0.033
+            completion(input_tokens=12_000, output_tokens=800),  # 0.032
+            completion(input_tokens=500_000, output_tokens=0),  # 1.000
+            completion(input_tokens=0, output_tokens=3_300),  # 0.033
         ]
     )
     client = make_client(sdk, session_factory, book, cost_limit="100")
@@ -141,7 +176,7 @@ async def test_usage_stays_recorded_when_the_caller_fails_afterwards(
     session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], book: Book
 ) -> None:
     """The usage row is committed by the client itself, not by the job's transaction."""
-    sdk = FakeSdk([message()])
+    sdk = FakeSdk([completion()])
     client = make_client(sdk, session_factory, book)
 
     async with session_factory() as job_session:
@@ -154,7 +189,7 @@ async def test_usage_stays_recorded_when_the_caller_fails_afterwards(
 async def test_model_without_a_price_is_refused_before_any_call(
     session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], book: Book
 ) -> None:
-    sdk = FakeSdk([message()])
+    sdk = FakeSdk([completion()])
 
     with pytest.raises(LLMError) as raised:
         await complete(make_client(sdk, session_factory, book), model="unknown-model")
@@ -165,10 +200,20 @@ async def test_model_without_a_price_is_refused_before_any_call(
     assert await usage_rows(session, book) == []
 
 
+@pytest.mark.parametrize(
+    "refused",
+    [
+        completion(None, refusal="I can't help with that."),
+        completion("", finish_reason="content_filter"),
+    ],
+)
 async def test_refusal_is_recorded_and_then_reported_as_an_error(
-    session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], book: Book
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    book: Book,
+    refused: Any,
 ) -> None:
-    sdk = FakeSdk([message("", stop_reason="refusal")])
+    sdk = FakeSdk([refused])
 
     with pytest.raises(LLMError) as raised:
         await complete(make_client(sdk, session_factory, book))
@@ -184,7 +229,7 @@ async def test_refusal_is_recorded_and_then_reported_as_an_error(
 async def test_call_is_refused_when_the_book_has_reached_its_cost_limit(
     session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], book: Book
 ) -> None:
-    sdk = FakeSdk([message(), message()])
+    sdk = FakeSdk([completion(), completion()])
     # The limit equals the cost of one call: the first call is allowed, the second is not.
     client = make_client(sdk, session_factory, book, cost_limit=str(COST_OF_DEFAULT_CALL))
 
@@ -213,7 +258,7 @@ async def test_cost_limit_counts_calls_of_earlier_jobs_of_the_same_book(
         )
     )
     await session.flush()
-    sdk = FakeSdk([message()])
+    sdk = FakeSdk([completion()])
 
     with pytest.raises(LLMError) as raised:
         await complete(make_client(sdk, session_factory, book, cost_limit="2.00"))
@@ -248,7 +293,7 @@ async def test_cost_of_another_book_does_not_count(
         )
     )
     await session.flush()
-    sdk = FakeSdk([message()])
+    sdk = FakeSdk([completion()])
 
     result = await complete(make_client(sdk, session_factory, book, cost_limit="2.00"))
 
@@ -267,7 +312,7 @@ async def test_temporary_failure_is_retried_and_the_call_succeeds(
     book: Book,
     failure: Exception,
 ) -> None:
-    sdk = FakeSdk([failure, failure, message("third time lucky")])
+    sdk = FakeSdk([failure, failure, completion("third time lucky")])
     sleeps = Sleeps()
 
     result = await complete(make_client(sdk, session_factory, book, sleep=sleeps))
@@ -283,7 +328,7 @@ async def test_gives_up_after_three_attempts_with_a_retryable_error(
     session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], book: Book
 ) -> None:
     """TC-017, the client's part: three failures, then the job decides what to do."""
-    sdk = FakeSdk([status_error(500), timeout_error(), status_error(429), message("too late")])
+    sdk = FakeSdk([status_error(500), timeout_error(), status_error(429), completion("too late")])
     sleeps = Sleeps()
 
     with pytest.raises(LLMError) as raised:
@@ -296,11 +341,11 @@ async def test_gives_up_after_three_attempts_with_a_retryable_error(
     assert await usage_rows(session, book) == []
 
 
-@pytest.mark.parametrize("status", [400, 401])
+@pytest.mark.parametrize("status", [400, 401, 404])
 async def test_rejected_request_is_not_retried(
     session_factory: async_sessionmaker[AsyncSession], book: Book, status: int
 ) -> None:
-    sdk = FakeSdk([status_error(status), message()])
+    sdk = FakeSdk([status_error(status), completion()])
     sleeps = Sleeps()
 
     with pytest.raises(LLMError) as raised:
@@ -316,7 +361,7 @@ async def test_rate_limit_waits_as_long_as_the_api_asks_up_to_a_cap(
     session_factory: async_sessionmaker[AsyncSession], book: Book
 ) -> None:
     sdk = FakeSdk(
-        [status_error(429, retry_after="7"), status_error(429, retry_after="600"), message()]
+        [status_error(429, retry_after="7"), status_error(429, retry_after="600"), completion()]
     )
     sleeps = Sleeps()
 
@@ -362,9 +407,9 @@ async def test_semaphore_limits_parallel_requests() -> None:
             most_at_once = max(most_at_once, running)
             await asyncio.sleep(0.01)
             running -= 1
-            return message()
+            return completion()
 
-    client = AnthropicLLMClient(
+    client = OpenAICompatibleLLMClient(
         sdk=SlowSdk([]),  # type: ignore[arg-type]
         session_factory=NoDatabase(),  # type: ignore[arg-type]
         book_id=uuid.uuid4(),

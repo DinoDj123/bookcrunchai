@@ -70,6 +70,24 @@ npm run dev                                          # http://localhost:3000, /a
 The backend reads `.env` from the folder it runs in; copy the root `.env` to `backend/.env`, or
 export the variables.
 
+## LLM
+
+The mentors provide no Claude API key and asked for open-source models (specification Appendix E).
+`backend/app/llm/` talks to any server with an OpenAI-compatible Chat Completions API, so the
+provider is configuration only (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL_FAST`,
+`LLM_MODEL_STRONG`, see `.env.example`):
+
+- **Locally:** [Ollama](https://ollama.com) on your machine, `ollama pull gemma3:4b` and
+  `ollama pull gemma3:12b`, with `OLLAMA_CONTEXT_LENGTH=32768` (the default context is too small
+  for a chapter). The containers reach it at `host.docker.internal:11434`.
+- **Demo host:** Railway has no GPUs, so the demo uses a hosted provider of open-weight models
+  (to be decided, specification 5.5).
+- Check the settings with one real call: `docker compose exec worker python scripts/llm_smoke.py`
+  (add `strong` for the strong model).
+
+Every model needs a line in `backend/config/prices.json`; models that cost nothing have price
+`"0"`, and token counts are recorded either way (FR-013).
+
 ## Checks (same as CI)
 
 ```bash
@@ -81,7 +99,7 @@ pytest                                   # includes tests/parsing/test_contract.
 npm run lint && npm run format:check && npm run typecheck && npm run build
 ```
 
-Automated tests never call paid APIs (Claude, Voyage); they use fakes. The API and worker tests
+Automated tests never call a real LLM or embedding service; they use fakes. The API and worker tests
 set `BOOKCRUNCH_PARSER=fake`, so they do not depend on the real parser; the parser has its own
 tests in `tests/parsing`, which run on the three test books in `tests/fixtures/books`.
 
@@ -202,7 +220,8 @@ Result of uploading the three test books through the API and the worker (23.11.2
 
 ## Deployment
 
-One Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`, a random `JWT_SECRET` (the API, the worker and the migrations refuse to start with the example value once `SITE_ADDRESS` is a domain) and `SITE_ADDRESS` to the domain in `.env`
+The mentors chose [Railway](https://railway.com) for the demo (specification 5.5); the Railway
+setup is being written. Until then, the steps for one Linux VM with Docker. On the host: `git pull`, set `ENVIRONMENT=production`, a random `JWT_SECRET` (the API, the worker and the migrations refuse to start with the example value once `SITE_ADDRESS` is a domain) and `SITE_ADDRESS` to the domain in `.env`
 (Caddy then gets an HTTPS certificate), `docker compose up --build -d`,
 `docker compose run --rm api alembic upgrade head`.
 

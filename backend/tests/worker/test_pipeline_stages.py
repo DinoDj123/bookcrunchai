@@ -144,7 +144,7 @@ async def test_notes_get_the_chunks_and_the_book_language(
     assert item.title == chapter_2.title
     assert item.chunks == tuple(chunk.text for chunk in await chunks_of(session, chapter_2))
     assert language == "en"
-    assert model == tasks.get_settings().claude_model_fast
+    assert model == tasks.get_settings().llm_model_fast
 
 
 def test_progress_fills_after_chunking() -> None:

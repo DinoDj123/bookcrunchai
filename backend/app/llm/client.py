@@ -1,4 +1,9 @@
-"""The real LLM client: Claude through the async Anthropic SDK (specification 5.2).
+"""The real LLM client: open-weight models behind an OpenAI-compatible API (specification 5.3).
+
+The mentors asked for open-source models instead of the Claude API (Appendix E). Almost every way
+of serving them speaks the same Chat Completions API: Ollama on a developer's machine, vLLM, and
+hosted providers such as Groq, OpenRouter or Together. So the client uses the OpenAI Python SDK
+with a configurable base URL, and the provider and the models are configuration only.
 
 One client object belongs to one book and one job. For every call it:
 1. checks that the book has not reached its cost limit (FR-017),
@@ -13,12 +18,13 @@ the number of attempts and the waiting are visible in one place and testable wit
 
 import asyncio
 import logging
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
-import anthropic
+import openai
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -31,15 +37,18 @@ MAX_ATTEMPTS = 3
 BACKOFF_BASE_SECONDS: float = 2
 # A 429 response may say how long to wait (Retry-After). Followed up to this many seconds.
 MAX_RETRY_AFTER_SECONDS: float = 30
+# Reasoning models (Qwen 3, DeepSeek R1) served by some servers put their thinking in the answer
+# text, before the answer, inside these tags.
+THINKING = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
 
 logger = logging.getLogger(__name__)
 
 
-class AnthropicLLMClient:
+class OpenAICompatibleLLMClient:
     def __init__(
         self,
         *,
-        sdk: anthropic.AsyncAnthropic,
+        sdk: openai.AsyncOpenAI,
         session_factory: async_sessionmaker[AsyncSession],
         book_id: uuid.UUID,
         job_id: uuid.UUID | None,
@@ -61,7 +70,8 @@ class AnthropicLLMClient:
     async def complete(
         self, *, step: UsageStep, model: str, system: str, user: str, max_tokens: int
     ) -> LLMResult:
-        # Checked before any money is spent: a model without a price could not be accounted for.
+        # Checked before the call: a model without a price could not be accounted for. A model
+        # that costs nothing (Ollama, a free tier) is listed with price 0.
         price = self._prices.get(model)
         if price is None:
             raise LLMError(
@@ -77,33 +87,31 @@ class AnthropicLLMClient:
             await self._check_cost_limit()
             response = await self._call_with_retries(model, system, user, max_tokens)
 
-        # Cache tokens are zero today (no prompt caching); counted as input if that changes.
+        # Some servers leave out the usage; the call is then recorded with zero tokens.
         usage = response.usage
-        input_tokens = (
-            usage.input_tokens
-            + (getattr(usage, "cache_creation_input_tokens", None) or 0)
-            + (getattr(usage, "cache_read_input_tokens", None) or 0)
-        )
-        output_tokens = usage.output_tokens
+        input_tokens = usage.prompt_tokens if usage else 0
+        output_tokens = usage.completion_tokens if usage else 0
+        if usage is None:
+            logger.warning("The LLM server returned no token usage for model %s", model)
         cost = cost_usd(price, input_tokens, output_tokens)
         await self._record_usage(step, model, input_tokens, output_tokens, cost)
 
         # Recorded first: a refused request may still have been billed.
-        if response.stop_reason == "refusal":
+        choice = response.choices[0] if response.choices else None
+        if choice is None or choice.finish_reason == "content_filter" or choice.message.refusal:
             raise LLMError(
                 LLMErrorCode.LLM_REQUEST_FAILED,
-                "The model refused the request",
+                "The model refused the request or returned no answer",
                 retryable=False,
             )
-        # Thinking blocks have no text; the answer is in the text blocks.
-        text = "".join(block.text for block in response.content if block.type == "text")
+        text = THINKING.sub("", choice.message.content or "", count=1)
         return LLMResult(
             text=text,
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost,
-            stop_reason=response.stop_reason,
+            stop_reason=choice.finish_reason,
         )
 
     async def _check_cost_limit(self) -> None:
@@ -122,43 +130,47 @@ class AnthropicLLMClient:
 
     async def _call_with_retries(
         self, model: str, system: str, user: str, max_tokens: int
-    ) -> Any:  # anthropic.types.Message
+    ) -> Any:  # openai.types.chat.ChatCompletion
         for attempt in range(1, MAX_ATTEMPTS + 1):
             retry_after: float | None = None
             try:
-                return await self._sdk.messages.create(
+                return await self._sdk.chat.completions.create(
                     model=model,
+                    # max_tokens, not max_completion_tokens: it is the one every
+                    # OpenAI-compatible server understands.
                     max_tokens=max_tokens,
-                    system=system,
-                    messages=[{"role": "user", "content": user}],
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
                 )
-            except anthropic.RateLimitError as error:  # 429
+            except openai.RateLimitError as error:  # 429
                 failure: Exception = error
                 retry_after = _retry_after_seconds(error)
-            except anthropic.APIStatusError as error:
+            except openai.APIStatusError as error:
                 if error.status_code < 500:
-                    # Bad key, unknown model, invalid request: the same request fails again.
+                    # Bad key, unknown model, request too large: the same request fails again.
                     raise LLMError(
                         LLMErrorCode.LLM_REQUEST_FAILED,
-                        f"The Claude API rejected the request ({error.status_code}): "
+                        f"The LLM server rejected the request ({error.status_code}): "
                         f"{error.message}",
                         retryable=False,
                     ) from error
                 failure = error
-            except anthropic.APIConnectionError as error:  # includes APITimeoutError
+            except openai.APIConnectionError as error:  # includes APITimeoutError
                 failure = error
 
             if attempt == MAX_ATTEMPTS:
                 raise LLMError(
                     LLMErrorCode.LLM_UNAVAILABLE,
-                    f"The Claude API did not answer after {MAX_ATTEMPTS} attempts: {failure}",
+                    f"The LLM server did not answer after {MAX_ATTEMPTS} attempts: {failure}",
                     retryable=True,
                 ) from failure
             delay = BACKOFF_BASE_SECONDS * 2 ** (attempt - 1)
             if retry_after is not None:
                 delay = max(delay, min(retry_after, MAX_RETRY_AFTER_SECONDS))
             logger.warning(
-                "Claude API call failed (attempt %s of %s), trying again in %s s: %s",
+                "LLM call failed (attempt %s of %s), trying again in %s s: %s",
                 attempt,
                 MAX_ATTEMPTS,
                 delay,
@@ -185,7 +197,7 @@ class AnthropicLLMClient:
             await session.commit()
 
 
-def _retry_after_seconds(error: anthropic.APIStatusError) -> float | None:
+def _retry_after_seconds(error: openai.APIStatusError) -> float | None:
     try:
         return float(error.response.headers.get("retry-after", ""))
     except ValueError:

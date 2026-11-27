@@ -9,7 +9,7 @@ import pytest
 from app.core.config import get_settings
 from app.db.models import UsageStep
 from app.llm import FakeLLMClient, LLMError, LLMErrorCode, factory, make_llm_client
-from app.llm.client import AnthropicLLMClient
+from app.llm.client import OpenAICompatibleLLMClient
 
 pytestmark = pytest.mark.anyio
 
@@ -29,29 +29,38 @@ def fresh_settings(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def test_clients_of_all_jobs_share_one_semaphore(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://llm.test/v1")
     monkeypatch.setenv("LLM_MAX_CONCURRENCY", "3")
     monkeypatch.setenv("BOOK_COST_LIMIT_USD", "1.25")
 
     first = make_llm_client(None, uuid.uuid4(), uuid.uuid4())  # type: ignore[arg-type]
     second = make_llm_client(None, uuid.uuid4(), None)  # type: ignore[arg-type]
 
-    assert isinstance(first, AnthropicLLMClient)
-    assert isinstance(second, AnthropicLLMClient)
+    assert isinstance(first, OpenAICompatibleLLMClient)
+    assert isinstance(second, OpenAICompatibleLLMClient)
     assert first._semaphore is second._semaphore
     assert first._semaphore._value == 3
     assert first._cost_limit_usd == Decimal("1.25")
     assert first._sdk.max_retries == 0  # the client retries itself, not the SDK as well
+    assert str(first._sdk.base_url).rstrip("/") == "http://llm.test/v1"
 
 
-def test_missing_api_key_is_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+def test_server_without_a_key_gets_a_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ollama needs no key, but the SDK will not start without one."""
+    monkeypatch.setenv("LLM_API_KEY", "")
 
-    with pytest.raises(LLMError) as raised:
-        make_llm_client(None, uuid.uuid4(), None)  # type: ignore[arg-type]
+    client = make_llm_client(None, uuid.uuid4(), None)  # type: ignore[arg-type]
 
-    assert raised.value.code == LLMErrorCode.LLM_REQUEST_FAILED
-    assert raised.value.retryable is False
+    assert client._sdk.api_key == factory.NO_KEY  # type: ignore[attr-defined]
+
+
+def test_empty_server_address_means_ollama_on_this_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """.env.example leaves LLM_BASE_URL empty."""
+    monkeypatch.setenv("LLM_BASE_URL", "")
+
+    assert get_settings().llm_base_url == "http://localhost:11434/v1"
 
 
 async def test_fake_client_replays_its_script_and_remembers_calls() -> None:

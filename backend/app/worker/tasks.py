@@ -279,7 +279,7 @@ async def _write_notes(ctx: dict[str, Any], session: AsyncSession, job: Job, boo
 
     write = get_write_chapter_notes()
     llm = _make_notes_llm(ctx, book, job)
-    model = get_settings().claude_model_fast
+    model = get_settings().llm_model_fast
 
     async def notes_for(chapter: Chapter) -> tuple[Chapter, str]:
         item = ChapterForNotes(

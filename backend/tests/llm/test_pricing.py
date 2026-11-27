@@ -50,5 +50,5 @@ def test_the_default_models_have_a_price() -> None:
     """A model without a price cannot be used; the defaults must work out of the box."""
     settings = Settings(_env_file=None)
 
-    assert settings.claude_model_fast in get_prices()
-    assert settings.claude_model_strong in get_prices()
+    assert settings.llm_model_fast in get_prices()
+    assert settings.llm_model_strong in get_prices()

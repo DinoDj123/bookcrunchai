@@ -36,7 +36,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.parsing import ChapterKind, FileFormat
 
-EMBEDDING_DIMENSIONS = 1024  # Voyage AI embeddings (FR-010)
+EMBEDDING_DIMENSIONS = 1024  # BAAI bge-m3, open-source multilingual embeddings (FR-010)
 
 
 class BookStatus(StrEnum):

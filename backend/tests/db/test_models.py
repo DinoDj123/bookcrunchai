@@ -79,7 +79,7 @@ def make_usage(book: Book) -> LlmUsage:
     return LlmUsage(
         book_id=book.id,
         step="map",
-        model="claude-sonnet-5-5",
+        model="gemma3:12b",
         input_tokens=1000,
         output_tokens=200,
         cost_usd=Decimal("0.006"),

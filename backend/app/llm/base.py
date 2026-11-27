@@ -1,7 +1,7 @@
 """What the rest of the application sees of the LLM: one call, its result and one error type.
 
 The pipeline (chapter notes, summaries, questions) depends only on this file. The real client is
-app.llm.client.AnthropicLLMClient, built by app.llm.factory.make_llm_client(); tests use
+app.llm.client.OpenAICompatibleLLMClient, built by app.llm.factory.make_llm_client(); tests use
 app.llm.fake.FakeLLMClient.
 """
 
@@ -44,7 +44,7 @@ class LLMResult:
     input_tokens: int
     output_tokens: int
     cost_usd: Decimal
-    # "end_turn" for a finished answer; "max_tokens" means the text was cut off at max_tokens.
+    # "stop" for a finished answer; "length" means the text was cut off at max_tokens.
     stop_reason: str | None
 
 

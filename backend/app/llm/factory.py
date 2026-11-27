@@ -8,13 +8,16 @@ import asyncio
 import uuid
 from functools import lru_cache
 
-import anthropic
+import openai
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
-from app.llm.base import LLMClient, LLMError, LLMErrorCode
-from app.llm.client import AnthropicLLMClient
+from app.llm.base import LLMClient
+from app.llm.client import OpenAICompatibleLLMClient
 from app.llm.pricing import get_prices
+
+# Ollama and vLLM accept any key, but the SDK refuses to start without one.
+NO_KEY = "not-needed"
 
 
 @lru_cache
@@ -23,12 +26,13 @@ def _shared_semaphore() -> asyncio.Semaphore:
 
 
 @lru_cache
-def _shared_sdk() -> anthropic.AsyncAnthropic:
+def _shared_sdk() -> openai.AsyncOpenAI:
     settings = get_settings()
-    return anthropic.AsyncAnthropic(
-        api_key=settings.anthropic_api_key,
+    return openai.AsyncOpenAI(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key or NO_KEY,
         timeout=settings.llm_timeout_seconds,
-        max_retries=0,  # AnthropicLLMClient retries itself
+        max_retries=0,  # OpenAICompatibleLLMClient retries itself
     )
 
 
@@ -39,11 +43,7 @@ def make_llm_client(
 ) -> LLMClient:
     """job_id is None for calls made outside the worker (questions, asked through the API)."""
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        raise LLMError(
-            LLMErrorCode.LLM_REQUEST_FAILED, "ANTHROPIC_API_KEY is not set", retryable=False
-        )
-    return AnthropicLLMClient(
+    return OpenAICompatibleLLMClient(
         sdk=_shared_sdk(),
         session_factory=session_factory,
         book_id=book_id,

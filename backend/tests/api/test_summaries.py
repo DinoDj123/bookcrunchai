@@ -10,8 +10,9 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings
 from app.db.models import Book, Chapter, ChapterSummary, Job, KeyIdea, Summary
-from tests.api.conftest import FakeQueue, register
+from tests.api.conftest import FakeCounter, FakeQueue, register
 from tests.api.test_library import add_book, add_user
 from tests.api.test_upload import EPUB, upload
 
@@ -294,7 +295,7 @@ async def test_invalid_request_is_refused(
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-async def test_queue_down_leaves_no_new_summary_behind(
+async def test_queue_down_keeps_the_waiting_job_for_the_next_request(
     client: AsyncClient, registered: str, session: AsyncSession, queue: FakeQueue
 ) -> None:
     book = await add_book(session, registered)
@@ -304,15 +305,22 @@ async def test_queue_down_leaves_no_new_summary_behind(
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "QUEUE_UNAVAILABLE"
-    assert await count(session, Summary) == 0
-    assert await summary_jobs(session, book) == []
+    # Nothing is removed: another request may already have handed the job to the queue.
+    summary = await summary_row(session, book)
+    jobs = await summary_jobs(session, book)
+    assert summary is not None and summary.status == "queued"
+    assert [job.status for job in jobs] == ["queued"]
 
-    # Once the queue is back, the same request works.
+    # Once the queue is back, the same request hands the same job to the queue.
     queue.fail = False
-    assert (await client.post(summaries_path(book), json=FIVE_CNR)).status_code == 202
+    again = await client.post(summaries_path(book), json=FIVE_CNR)
+    assert again.status_code == 202
+    assert again.json()["job"]["id"] == str(jobs[0].id)
+    assert [call[1] for call in queue.calls] == [(str(jobs[0].id),)]
+    assert len(await summary_jobs(session, book)) == 1
 
 
-async def test_queue_down_leaves_a_failed_summary_failed(
+async def test_queue_down_on_a_failed_summary_keeps_the_new_job(
     client: AsyncClient, registered: str, session: AsyncSession, queue: FakeQueue
 ) -> None:
     book = await add_book(session, registered)
@@ -323,8 +331,35 @@ async def test_queue_down_leaves_a_failed_summary_failed(
     response = await client.post(summaries_path(book), json=FIVE_CNR)
 
     assert response.status_code == 503
-    assert (await summary_row(session, book)).status == "failed"  # type: ignore[union-attr]
-    assert len(await summary_jobs(session, book)) == 1
+    assert (await summary_row(session, book)).status == "queued"  # type: ignore[union-attr]
+    statuses = sorted(job.status for job in await summary_jobs(session, book))
+    assert statuses == ["failed", "queued"]
+
+
+async def test_new_summary_jobs_are_limited_per_user(
+    client: AsyncClient,
+    registered: str,
+    session: AsyncSession,
+    settings: Settings,
+    counter: FakeCounter,
+) -> None:
+    settings.summary_rate_limit = 2
+    book = await add_book(session, registered)
+    await add_ready_summary(session, book)  # 5min cnr
+
+    first = await client.post(summaries_path(book), json={"length": "5min", "language": "en"})
+    second = await client.post(summaries_path(book), json={"length": "15min", "language": "en"})
+    third = await client.post(summaries_path(book), json={"length": "15min", "language": "cnr"})
+
+    assert (first.status_code, second.status_code) == (202, 202)
+    assert third.status_code == 429
+    assert third.json()["error"]["code"] == "RATE_LIMITED"
+    assert third.headers["Retry-After"] == str(FakeCounter.WINDOW_LEFT)
+    assert await count(session, Summary) == 3  # the refused one is not kept
+    # A ready summary, and one already being made, are still answered.
+    assert (await client.post(summaries_path(book), json=FIVE_CNR)).status_code == 200
+    again = await client.post(summaries_path(book), json={"length": "5min", "language": "en"})
+    assert again.status_code == 202
 
 
 async def test_summaries_need_a_session(client: AsyncClient, session: AsyncSession) -> None:

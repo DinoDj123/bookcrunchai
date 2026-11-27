@@ -126,13 +126,14 @@ All under `/api/v1`; the full reference is the OpenAPI page at `/api/v1/docs`.
 | `GET /books/{id}` | One book with `chapter_count`, `active_job` (the processing job to poll, or null; summary jobs are not included), `error_message` of a failed book and usage totals |
 | `GET /books/{id}/chapters` | Table of contents: `position`, `title`, `kind`, `word_count`, `has_notes` |
 | `GET /books/{id}/usage` | Tokens and estimated cost by pipeline step and in total; `cost_usd` is a decimal string |
-| `POST /books/{id}/summaries` | Body `{"length": "5min"\|"15min", "language": "en"\|"cnr"}`. 200 with the summary if it is ready (from the cache, no LLM cost); otherwise 202 with `summary` and the `job` to poll. A failed summary is queued again; 409 `BOOK_NOT_READY` before the book is processed |
+| `POST /books/{id}/summaries` | Body `{"length": "5min"\|"15min", "language": "en"\|"cnr"}`. 200 with the summary if it is ready (from the cache, no LLM cost); otherwise 202 with `summary` and the `job` to poll. A failed summary is queued again; 409 `BOOK_NOT_READY` before the book is processed; 503 `QUEUE_UNAVAILABLE` if Redis is down (the summary stays `queued` and the same request later starts it) |
 | `GET /books/{id}/summaries?length=&language=` | The summary in any state: `overview`, `chapters`, `key_ideas`, `word_count`, and while it is not ready its latest `job` (stage, progress, error); 404 `SUMMARY_NOT_FOUND` if never requested |
 | `GET /jobs/{id}` | Status, stage and progress of a job; poll it while the job runs |
 
 Rate limits (429 `RATE_LIMITED`, with `details.retry_after_seconds` and a `Retry-After` header):
 10 login attempts and 5 registrations per minute per client address (`LOGIN_RATE_LIMIT`,
-`REGISTER_RATE_LIMIT`) and 20 processed books per hour per user (`UPLOAD_RATE_LIMIT`). The client
+`REGISTER_RATE_LIMIT`), 20 processed books per hour per user (`UPLOAD_RATE_LIMIT`) and 20 started
+summary jobs per hour per user (`SUMMARY_RATE_LIMIT`; a ready summary is never refused). The client
 address is the one Caddy saw; an `X-Forwarded-For` header sent by the client is not trusted.
 Another user's book answers 404 `BOOK_NOT_FOUND` on every book endpoint; demo books can be read
 by everyone and changed by no one. A processed book is an upload that was stored or a retry; a
@@ -196,6 +197,10 @@ when `POST /books/{id}/summaries` asks for a summary that is not ready.
   done, so a summary is never half stored. A ready summary is never made again.
 - A failed job marks the summary `failed` and leaves the book `ready`; asking again starts a new
   job. LLM errors are handled as for chapter notes; `fail_stale_jobs` covers summary jobs too.
+- Only the newest job of a summary writes or fails it. An old job that ARQ delivers again after
+  `fail_stale_jobs` failed it does nothing, so a summary is never paid for or stored twice.
+- Both reduce calls together have 480 s (`SUMMARY_TIMEOUT_SECONDS`), below ARQ's 600 s job
+  timeout; a slower model fails the job with `SUMMARY_TIMEOUT`.
 - **Temporary:** the reduce step is a fake (`BOOKCRUNCH_SUMMARY=fake`) that returns a summary of
   exactly the target length from the notes' own words, without an LLM call. Track A writes the
   real prompt (`write_book_summary` in the draft contract). `FAKE_SUMMARY_DELAY=5` makes the fake

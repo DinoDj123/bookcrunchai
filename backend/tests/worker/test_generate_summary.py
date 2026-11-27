@@ -2,6 +2,7 @@
 with one more try, what is stored, and how failures end the job and the summary. Uses the fake
 parser, chunker, notes and reduce step, never a paid API. Needs TEST_DATABASE_URL."""
 
+import asyncio
 import dataclasses
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -30,6 +31,7 @@ from app.worker.tasks import (
     LLM_UNAVAILABLE_MESSAGE,
     STALE_AFTER_SECONDS,
     SUMMARY_INVALID_MESSAGE,
+    SUMMARY_TIMEOUT_MESSAGE,
     fail_stale_jobs,
     generate_summary,
     process_book,
@@ -349,6 +351,97 @@ async def test_bug_in_the_reduce_step_fails_at_once(
     assert job.error_code == "SUMMARY_INTERNAL_ERROR"
     assert job.error_message == GENERIC_ERROR_MESSAGE
     assert summary.status == "failed"
+
+
+async def test_summary_that_takes_too_long_fails(
+    ctx: dict[str, Any], session: AsyncSession, ready_book: Book, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def slow(*_args: Any, **_kwargs: Any) -> SummaryDraft:
+        await asyncio.sleep(5)
+        raise AssertionError("not reached")
+
+    monkeypatch.setattr(tasks, "SUMMARY_TIMEOUT_SECONDS", 0.05)
+    use_summary(monkeypatch, slow)
+    summary, job = await request_summary(session, ready_book)
+
+    await generate_summary(ctx, str(job.id))
+    await refresh(session, summary, job)
+
+    assert job.error_code == "SUMMARY_TIMEOUT"
+    assert job.error_message == SUMMARY_TIMEOUT_MESSAGE
+    assert summary.status == "failed"
+
+
+def test_summary_time_limit_is_below_the_job_timeout() -> None:
+    assert tasks.SUMMARY_TIMEOUT_SECONDS < tasks.JOB_TIMEOUT_SECONDS
+
+
+# --------------------------------------------------------------------------- old and new jobs
+
+
+async def newer_job(session: AsyncSession, job: Job) -> Job:
+    """A second job for the same summary, as a POST after the first job failed creates it."""
+    await session.refresh(job)
+    newer = Job(
+        id=uuid.uuid4(),
+        book_id=job.book_id,
+        type="generate_summary",
+        status="queued",
+        params=job.params,
+        created_at=job.created_at + timedelta(minutes=15),
+    )
+    session.add(newer)
+    await session.flush()
+    return newer
+
+
+async def test_old_job_does_not_write_a_summary_a_newer_job_owns(
+    ctx: dict[str, Any], session: AsyncSession, ready_book: Book, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    summary, old = await request_summary(session, ready_book)
+    await newer_job(session, old)
+    write, calls = returning()
+    use_summary(monkeypatch, write)
+
+    await generate_summary(ctx, str(old.id))
+    await refresh(session, summary, old)
+
+    assert calls == []  # nothing paid
+    assert summary.status == "queued"  # left to the newer job
+    assert old.status == "done"
+
+
+async def test_newer_job_arriving_during_the_call_wins(
+    ctx: dict[str, Any], session: AsyncSession, ready_book: Book, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    summary, old = await request_summary(session, ready_book)
+
+    async def write(*args: Any, **kwargs: Any) -> SummaryDraft:
+        await newer_job(session, old)  # the user asked again while the model was writing
+        return await fake_write_book_summary(*args, **kwargs)
+
+    use_summary(monkeypatch, write)
+    await generate_summary(ctx, str(old.id))
+    await refresh(session, summary)
+
+    assert summary.status == "running"  # not stored by the old job
+    assert await stored_chapter_positions(session, summary) == []
+
+
+async def test_old_job_failing_leaves_the_newer_jobs_summary_alone(
+    ctx: dict[str, Any], session: AsyncSession, ready_book: Book
+) -> None:
+    summary, old = await request_summary(session, ready_book)
+    await newer_job(session, old)
+    old.status = "running"
+    old.started_at = datetime.now(UTC) - timedelta(seconds=STALE_AFTER_SECONDS + 60)
+    await session.flush()
+
+    assert await fail_stale_jobs(ctx) == 1
+    await refresh(session, summary, old)
+
+    assert old.status == "failed"
+    assert summary.status == "queued"
 
 
 # --------------------------------------------------------------------------- worker wiring

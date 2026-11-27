@@ -7,7 +7,8 @@ generate_summary job (app.worker.tasks) and answers 202 with the summary and the
 (GET /jobs/{id}). GET reads the summary in any state, with its latest job while it is not ready.
 
 The book comes through get_readable_book: the user's own book or a demo book. A summary of a demo
-book is shared by everyone who reads it, like the book.
+book is shared by everyone who reads it, like the book. Starting a new job counts against the
+user's summary limit (SUMMARY_RATE_LIMIT per hour); a ready summary is never limited.
 """
 
 import logging
@@ -15,12 +16,13 @@ import uuid
 
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.books import JobBrief, queue_unavailable
-from app.api.deps import QueueDep, ReadableBook, SessionDep
+from app.api.books import JobBrief
+from app.api.deps import CurrentUser, QueueDep, ReadableBook, SessionDep, SettingsDep
+from app.api.rate_limit import CounterDep, count_summary, limit_summaries
 from app.core.errors import AppError
 from app.db.models import (
     BookStatus,
@@ -35,6 +37,7 @@ from app.db.models import (
     SummaryLength,
     SummaryStatus,
 )
+from app.db.queries import latest_summary_job
 from app.worker.queue import enqueue_job
 
 logger = logging.getLogger(__name__)
@@ -97,18 +100,8 @@ def book_not_ready() -> AppError:
     return AppError(409, "BOOK_NOT_READY", "The book is still being processed.")
 
 
-async def latest_job(session: AsyncSession, summary: Summary) -> Job | None:
-    """The newest generate_summary job of this summary (a failed summary may have older ones)."""
-    return await session.scalar(
-        select(Job)
-        .where(
-            Job.book_id == summary.book_id,
-            Job.type == JobType.GENERATE_SUMMARY,
-            Job.params["summary_id"].astext == str(summary.id),
-        )
-        .order_by(Job.created_at.desc())
-        .limit(1)
-    )
+def queue_unavailable() -> AppError:
+    return AppError(503, "QUEUE_UNAVAILABLE", "The summary could not be started. Try again.")
 
 
 async def summary_out(session: AsyncSession, summary: Summary) -> SummaryOut:
@@ -124,7 +117,9 @@ async def summary_out(session: AsyncSession, summary: Summary) -> SummaryOut:
         .where(KeyIdea.summary_id == summary.id)
         .order_by(KeyIdea.position)
     )
-    job = None if summary.status == SummaryStatus.READY else await latest_job(session, summary)
+    job = None
+    if summary.status != SummaryStatus.READY:
+        job = await latest_summary_job(session, summary)
     return SummaryOut(
         id=summary.id,
         status=summary.status,
@@ -172,16 +167,21 @@ def queued_answer(summary: Summary, job: Job) -> SummaryQueued:
 async def request_summary(
     body: SummaryRequest,
     book: ReadableBook,
+    user: CurrentUser,
     response: Response,
     session: SessionDep,
+    settings: SettingsDep,
     queue: QueueDep,
+    counter: CounterDep,
 ) -> SummaryOut | SummaryQueued:
     """Get the summary for a length and language, or have it made.
 
     200 with the summary when it is ready. 202 with the summary and its job when it is queued or
     being made; a failed summary is queued again with a new job. 409 BOOK_NOT_READY until the book
-    has been processed; 503 QUEUE_UNAVAILABLE if the job cannot be queued now.
+    has been processed; 429 RATE_LIMITED when the user has started too many summaries this hour;
+    503 QUEUE_UNAVAILABLE if the job cannot be queued now (the same request later starts it).
     """
+    user_id = user.id  # read now: the commits below expire the loaded user
     if book.status != BookStatus.READY:
         raise book_not_ready()
 
@@ -210,14 +210,16 @@ async def request_summary(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    assert summary is not None  # inserted above or already there
+    if summary is None:
+        # Inserted above or already there, unless the book was deleted in between.
+        raise AppError(404, "BOOK_NOT_FOUND", "Book not found.")
 
     if summary.status == SummaryStatus.READY:
         await session.commit()  # only releases the lock
         response.status_code = 200
         return await summary_out(session, summary)
 
-    job = None if created_id else await latest_job(session, summary)
+    job = None if created_id else await latest_summary_job(session, summary)
     if job is not None and job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
         await session.commit()
         if job.status == JobStatus.QUEUED:
@@ -230,8 +232,13 @@ async def request_summary(
                 raise queue_unavailable() from error
         return queued_answer(summary, job)
 
-    # New, failed, or (after a lost enqueue) waiting without a job: a new job. A failed job is not
-    # queued again under its own ID; it stays as the record of what went wrong.
+    # New, failed, or waiting without a job: a new job, which is new LLM work and is counted. A
+    # failed job is not queued again under its own ID; it stays as the record of what went wrong.
+    try:
+        await limit_summaries(counter, settings, user_id)
+    except AppError:
+        await session.rollback()  # a summary inserted above is not kept
+        raise
     summary.status = SummaryStatus.QUEUED
     job = summary_job(summary)
     session.add(job)
@@ -240,16 +247,13 @@ async def request_summary(
     try:
         await enqueue_job(queue, job)
     except Exception as error:
+        # The summary and its job stay "queued"; nothing is removed. Another request may already
+        # have found this job and handed it to the queue, and "could not queue" is not certain
+        # (Redis may have taken the job and only the answer got lost). The next request for this
+        # summary hands the waiting job to the queue again (above).
         logger.exception("Job %s could not be queued", job.id)
-        # Nothing is left waiting for a job nobody will run: a new summary is removed, an old one
-        # goes back to failed, so the same request can simply be repeated.
-        await session.execute(delete(Job).where(Job.id == job.id))
-        if created_id:
-            await session.execute(delete(Summary).where(Summary.id == summary.id))
-        else:
-            summary.status = SummaryStatus.FAILED
-        await session.commit()
         raise queue_unavailable() from error
+    await count_summary(counter, user_id)
     return queued_answer(summary, job)
 
 

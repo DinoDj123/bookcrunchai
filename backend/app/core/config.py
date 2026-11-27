@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     login_rate_limit: int = 10
     register_rate_limit: int = 5  # registrations per client address per minute
     upload_rate_limit: int = 20
+    summary_rate_limit: int = 20  # summary jobs started per user per hour
 
     # Signs the session JWT (section 7.3). Must be overridden outside local development.
     jwt_secret: str = "change-me-local-only"

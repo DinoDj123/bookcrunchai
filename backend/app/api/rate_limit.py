@@ -1,4 +1,4 @@
-"""Rate limits (specification 4.2: login, upload and question endpoints).
+"""Rate limits (specification 4.2: login, upload and question endpoints, and starting summaries).
 
 A fixed window counted in Redis: the first request creates a counter that expires when the window
 ends, every counted request adds one, and a request over the limit gets 429 RATE_LIMITED. Redis is
@@ -18,6 +18,7 @@ from arq.connections import ArqRedis
 from fastapi import Depends, Request
 
 from app.api.deps import CurrentUser, SettingsDep
+from app.core.config import Settings
 from app.core.errors import AppError
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 LOGIN_WINDOW_SECONDS = 60
 REGISTER_WINDOW_SECONDS = 60
 UPLOAD_WINDOW_SECONDS = 60 * 60
+SUMMARY_WINDOW_SECONDS = 60 * 60
 
 
 class RequestCounter:
@@ -139,3 +141,20 @@ async def limit_uploads(user: CurrentUser, counter: CounterDep, settings: Settin
 async def count_upload(counter: RequestCounter, user_id: uuid.UUID) -> None:
     """Count one started processing (a new book, or a retry of a failed one) for the user."""
     await _count(counter, "upload", str(user_id), UPLOAD_WINDOW_SECONDS, add=True)
+
+
+async def limit_summaries(counter: RequestCounter, settings: Settings, user_id: uuid.UUID) -> None:
+    """Per user: every summary job started is paid LLM work, and a summary that keeps failing (or
+    one of a demo book, whose cost limit all its readers share) could otherwise be requested
+    without end. Called only when a new job would start, so a ready summary is never refused;
+    count_summary() does the counting."""
+    count, seconds_left = await _count(
+        counter, "summary", str(user_id), SUMMARY_WINDOW_SECONDS, add=False
+    )
+    if count >= settings.summary_rate_limit:
+        raise rate_limited(seconds_left)
+
+
+async def count_summary(counter: RequestCounter, user_id: uuid.UUID) -> None:
+    """Count one started summary job for the user."""
+    await _count(counter, "summary", str(user_id), SUMMARY_WINDOW_SECONDS, add=True)

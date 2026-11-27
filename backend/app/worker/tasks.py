@@ -54,6 +54,7 @@ from app.db.models import (
     SummaryLength,
     SummaryStatus,
 )
+from app.db.queries import latest_summary_job
 from app.llm.base import LLMClient, LLMError, LLMErrorCode
 from app.llm.factory import make_llm_client
 from app.llm.fake import FakeLLMClient
@@ -127,13 +128,19 @@ NOTES_INTERNAL_ERROR = "NOTES_INTERNAL_ERROR"
 NO_CHAPTER_NOTES = "NO_CHAPTER_NOTES"
 SUMMARY_INVALID = "SUMMARY_INVALID"
 SUMMARY_INTERNAL_ERROR = "SUMMARY_INTERNAL_ERROR"
+SUMMARY_TIMEOUT = "SUMMARY_TIMEOUT"
 
 COST_LIMIT_MESSAGE = "This book has reached its cost limit for AI processing."
 LLM_UNAVAILABLE_MESSAGE = "The AI service is not available at the moment. Please try again later."
 SUMMARY_INVALID_MESSAGE = "The AI did not produce a usable summary. Please try again."
+SUMMARY_TIMEOUT_MESSAGE = "The AI took too long to write the summary. Please try again later."
 
 # FR-008: a result that fails validation gets one more call, then the summary fails.
 SUMMARY_ATTEMPTS = 2
+# Both calls together, each with the LLM client's own retries. Without a limit of our own, a slow
+# model would run into ARQ's job timeout, which stops the task without failing the job, and the
+# summary would stay "running" until fail_stale_jobs. Must stay below JOB_TIMEOUT_SECONDS.
+SUMMARY_TIMEOUT_SECONDS: float = 480
 # summaries.model of a summary written by the fake reduce step, which calls no model.
 FAKE_MODEL = "fake"
 
@@ -411,12 +418,24 @@ def _summary_id(job: Job) -> uuid.UUID | None:
     return uuid.UUID(value) if value else None
 
 
+async def _is_superseded(session: AsyncSession, summary: Summary, job: Job) -> bool:
+    """True if the summary is ready, or a newer job has taken it over. An old job can come back
+    after fail_stale_jobs failed it (ARQ still holds a try of it) while the user has already asked
+    again; then only the newest job may write the summary, or it would be paid for and stored
+    twice."""
+    if summary.status == SummaryStatus.READY:
+        return True
+    latest = await latest_summary_job(session, summary)
+    return latest is None or latest.id != job.id
+
+
 async def _summarise(ctx: dict[str, Any], session: AsyncSession, job: Job) -> None:
     summary_id = _summary_id(job)
     summary = await session.get(Summary, summary_id) if summary_id else None
     if summary is None:
         raise JobFailed(INTERNAL_ERROR)  # the API always saves the summary first
-    if summary.status == SummaryStatus.READY:
+    if await _is_superseded(session, summary, job):
+        logger.info("Job %s: summary %s is ready or has a newer job", job.id, summary.id)
         return
     book = await session.get_one(Book, job.book_id)
     summary.status = SummaryStatus.RUNNING
@@ -441,17 +460,29 @@ async def _summarise(ctx: dict[str, Any], session: AsyncSession, job: Job) -> No
         FakeLLMClient() if fake else make_llm_client(ctx["session_factory"], book.id, job.id)
     )
     model = get_settings().llm_model_strong
-    draft = await _call_summary(
-        ctx,
-        job,
-        get_write_book_summary(),
-        book.title,
-        chapters,
-        SummaryLength(summary.length),
-        Language(summary.language),
-        llm,
-        model,
-    )
+    try:
+        async with asyncio.timeout(SUMMARY_TIMEOUT_SECONDS):
+            draft = await _call_summary(
+                ctx,
+                job,
+                get_write_book_summary(),
+                book.title,
+                chapters,
+                SummaryLength(summary.length),
+                Language(summary.language),
+                llm,
+                model,
+            )
+    except TimeoutError as error:
+        logger.error("Job %s: the summary took longer than %ss", job.id, SUMMARY_TIMEOUT_SECONDS)
+        raise JobFailed(SUMMARY_TIMEOUT, SUMMARY_TIMEOUT_MESSAGE) from error
+
+    # Locked and read again: a newer job may have finished or taken over while the model wrote.
+    # The lock keeps two jobs from storing the summary at the same moment.
+    await session.refresh(summary, with_for_update=True)
+    if await _is_superseded(session, summary, job):
+        logger.info("Job %s: summary %s was finished by a newer job", job.id, summary.id)
+        return
     await _save_summary(session, summary, draft, FAKE_MODEL if fake else model)
 
 
@@ -529,10 +560,11 @@ async def _save_summary(
 
 async def _fail_summary(session: AsyncSession, job: Job) -> None:
     """run_job's on_failure for generate_summary: the summary fails with its job, in the same
-    transaction. A new POST for the same length and language starts it again."""
+    transaction. A new POST for the same length and language starts it again. An old job that
+    fails leaves alone a summary that a newer job has taken over."""
     summary_id = _summary_id(job)
     summary = await session.get(Summary, summary_id) if summary_id else None
-    if summary is not None and summary.status != SummaryStatus.READY:
+    if summary is not None and not await _is_superseded(session, summary, job):
         summary.status = SummaryStatus.FAILED
 
 

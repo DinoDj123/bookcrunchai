@@ -10,8 +10,8 @@ from the chapter notes: an overview, a summary per chapter and key ideas linked 
 summary that exists is returned at once and never paid for twice (cache). This is the last part of
 the M2 happy path on the backend.
 
-Non-goals: the real reduce prompt (Track A: "prompts, summaries"), the summary UI, rate limiting of
-summary requests (at most four summaries per book, all cached, and the book's cost limit applies).
+Non-goals: the real reduce prompt (Track A: "prompts, summaries"), the summary UI, anything beyond a
+per-user limit on started summary jobs.
 
 ## Approaches
 
@@ -59,6 +59,10 @@ summary requests (at most four summaries per book, all cached, and the book's co
   deleted first, so nothing is duplicated.
 - `_fail_summary` sets the summary `failed`; the book stays `ready`.
 - `fail_stale_jobs` also marks the summary of a stale generate_summary job `failed`.
+- Only the newest job of a summary may write or fail it; the summary row is locked and checked
+  again before storing (added after review).
+- The reduce step has its own time limit, 480 s, below the 600 s ARQ job timeout →
+  `SUMMARY_TIMEOUT` (added after review).
 
 ### API (new app/api/summaries.py)
 
@@ -74,8 +78,12 @@ summary requests (at most four summaries per book, all cached, and the book's co
   - `failed` → back to `queued` with a **new** job → 202.
   - none → new summary (`queued`) and job → 202. A concurrent POST that loses the unique-key race
     reads the winner's row and answers as above.
-- Enqueue after commit. If Redis is down: the job is deleted, a new summary is deleted, a reset
-  one goes back to `failed`; **503 QUEUE_UNAVAILABLE**.
+- Enqueue after commit. If Redis is down: **503 QUEUE_UNAVAILABLE**; the summary and its job stay
+  `queued` and the next POST hands the job to the queue (changed after review: deleting raced with
+  a second request that had already enqueued the same job).
+- A new job counts against `SUMMARY_RATE_LIMIT` (20 per user per hour); a ready summary does not
+  (added after review: a failing summary could be requested without end, and a demo book's cost
+  limit is shared).
 - 200 body (spec 7.2): `{ id, status, length, language, overview, chapters: [{ chapter_position,
   title, content }], key_ideas: [{ text, chapter_position }], word_count, job }`. 202 body:
   `{ summary: { id, status }, job: { id, status } }`.

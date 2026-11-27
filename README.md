@@ -184,10 +184,11 @@ Result of uploading the three test books through the API and the worker (23.11.2
 
 ## Deployment
 
-One Linux VM with Docker Compose. The steps, the `.env` values for the host, troubleshooting and
-the daily database backup are in [docs/deploy.md](docs/deploy.md); `scripts/deploy.sh` does a
-deployment (`git pull`, build, migrations, `docker compose up -d`) and `scripts/backup_db.sh` the
-backup. Not deployed yet: the VM and the domain are not available.
+Railway, as the mentors proposed: Caddy as the only public service in front of the frontend and
+one backend service that runs the API and the worker together (a Railway volume can be attached to
+one service only), plus PostgreSQL with pgvector and Redis. Every merge to `main` deploys. The
+setup, the variables, troubleshooting and backups are in [docs/deploy.md](docs/deploy.md). Not
+deployed yet.
 
 ## Design decisions
 

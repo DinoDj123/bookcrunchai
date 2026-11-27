@@ -3,10 +3,11 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
 
 from app.parsing.contract import FileFormat, ParseError, ParseErrorCode
 from app.parsing.document import Block, RawDocument
-from app.parsing.epub import read_epub
+from app.parsing.epub import _epub_types, read_epub
 
 from .builders import encryption_xml, make_epub, paragraphs
 
@@ -108,6 +109,21 @@ def test_unwanted_elements_are_not_in_blocks(tmp_path: Path) -> None:
     assert "Illustration caption" not in joined
     assert "Footnote text" not in joined
     assert joined == "Before after. | CHAPTER II. | Text continues."
+
+
+@pytest.mark.parametrize("parser", ["xml", "lxml"])
+def test_epub_type_is_read_with_both_parsers(parser: str) -> None:
+    # The XML parser names the attribute "type" in the OPS namespace (lxml 6.2 drops the
+    # "epub" prefix); the HTML parser keeps "epub:type". A plain "type" is not epub:type.
+    soup = BeautifulSoup(
+        '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+        '<body><aside epub:type="footnote rearnote"/><ol type="1"/>'
+        '<script type="text/javascript"/></body></html>',
+        parser,
+    )
+    assert _epub_types(soup.find("aside")) == {"footnote", "rearnote"}
+    assert _epub_types(soup.find("ol")) == set()
+    assert _epub_types(soup.find("script")) == set()
 
 
 def test_headings_get_heading_level(tmp_path: Path) -> None:
@@ -242,6 +258,22 @@ def test_epub3_nav_with_levels_and_resolved_targets(tmp_path: Path) -> None:
         ("Chapter 2", 2, "OEBPS/text/b c.xhtml"),
     ]
     assert block_with(doc, "OEBPS/text/b c.xhtml").text == "Chapter 2"
+
+
+@pytest.mark.parametrize("first_nav", ["landmarks", "page-list"])
+def test_epub3_nav_toc_is_found_after_other_navs(tmp_path: Path, first_nav: str) -> None:
+    other = (
+        f'<nav epub:type="{first_nav}"><ol>'
+        '<li><a href="a.xhtml#c1">Start</a></li><li><a href="a.xhtml#c2">Page 2</a></li>'
+        "</ol></nav>"
+    )
+    path = make_epub(
+        tmp_path,
+        docs=[("a.xhtml", '<h2 id="c1">One</h2><p>x</p><h2 id="c2">Two</h2><p>y</p>')],
+        nav=[("One", "a.xhtml#c1"), ("Two", "a.xhtml#c2")],
+        nav_before=other,
+    )
+    assert [e.title for e in read_epub(path).toc] == ["One", "Two"]
 
 
 def test_epub2_ncx(tmp_path: Path) -> None:

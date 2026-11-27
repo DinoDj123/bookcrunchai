@@ -1,5 +1,5 @@
-# All services of bookcrunch.ai (specification section 5.5). The same file is used locally and on
-# the demo host; only the .env file differs.
+# All services of bookcrunch.ai for local development (specification section 5.5). The demo runs
+# on Railway from the same Dockerfiles, but not from this file (docs/deploy.md).
 #
 #   docker compose up --build -d                              start everything
 #   docker compose run --rm api alembic upgrade head         apply migrations
@@ -22,14 +22,13 @@ x-backend: &backend
 
 services:
   proxy:
-    image: caddy:2-alpine
+    build: ./proxy  # Caddy with proxy/Caddyfile, the same image as on Railway
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
     depends_on:
       - frontend

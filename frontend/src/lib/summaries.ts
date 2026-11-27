@@ -28,12 +28,26 @@ export type Summary = {
   chapters: ChapterSummary[];
   key_ideas: KeyIdea[];
   word_count: number;
+  /** Always null for a ready summary; the API sends the field in every answer. */
+  job: null;
 };
 
-/** A stored summary that cannot be shown: it is being generated, or its generation failed. */
+/** The latest job of a summary that is not ready: what to poll, or why it failed. */
+export type SummaryJob = {
+  id: string;
+  status: JobStatus;
+  stage: string | null;
+  progress: number;
+  error_code: string | null;
+  error_message: string | null;
+};
+
+/** A stored summary that cannot be shown: it is being generated, or its generation failed.
+ *  The API sends the fields of Summary too, empty; only what the page uses is named here. */
 export type UnfinishedSummary = {
   id: string;
   status: "queued" | "running" | "failed";
+  job: SummaryJob | null;
 };
 
 /** The answer of POST /summaries when the summary has to be generated first (202). */
@@ -46,13 +60,9 @@ export type QueuedSummary = {
 export const WORDS_PER_MINUTE = 220;
 
 /**
- * The stored summary for this length and language, or null if there is none. Never starts a
- * generation, so it is safe to call when the user only looks at the options.
- *
- * ASSUMPTION, to be confirmed with the summary endpoints: the specification lists
- * GET /books/{id}/summaries but does not describe its answers. This expects the summary as
- * POST returns it, `{ id, status }` at least while it is not ready, and 404 with a code other
- * than BOOK_NOT_FOUND when no summary exists for the combination.
+ * The stored summary for this length and language in whatever state it is, or null if it was
+ * never requested (404 SUMMARY_NOT_FOUND). Never starts a generation, so it is safe to call when
+ * the user only looks at the options.
  */
 export async function findSummary(
   bookId: string,
@@ -63,16 +73,15 @@ export async function findSummary(
   try {
     return await apiFetch<Summary | UnfinishedSummary>(`/books/${bookId}/summaries?${query}`);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404 && error.code !== "BOOK_NOT_FOUND") {
-      return null;
-    }
+    if (error instanceof ApiError && error.code === "SUMMARY_NOT_FOUND") return null;
     throw error;
   }
 }
 
 /**
- * Get or generate (FR-014): answers the summary if it is stored, otherwise queues its generation
- * and answers with the job to follow.
+ * Get or generate (FR-014): answers the summary if it is ready, otherwise queues its generation
+ * and answers with the job to follow. For a summary that is already queued or running it answers
+ * with that job and starts nothing new; a failed summary gets a new job.
  */
 export function requestSummary(
   bookId: string,
@@ -83,7 +92,8 @@ export function requestSummary(
 }
 
 /** apiFetch does not pass on the HTTP status (200 or 202), so the two answers of POST are told
- *  apart by their shape: only the queued one has a job. */
+ *  apart by their shape: only the queued one wraps the summary in `summary`. (Both have `job`:
+ *  it is null in the ready one.) */
 export function isQueued(answer: Summary | QueuedSummary): answer is QueuedSummary {
-  return "job" in answer;
+  return "summary" in answer;
 }

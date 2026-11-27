@@ -69,9 +69,13 @@ async function storedView(choice: Choice): Promise<View> {
   const found = await findSummary(choice.bookId, choice.length, choice.language);
   if (found === null) return { kind: "none" };
   if (found.status === "ready") return { kind: "ready", summary: found };
-  if (found.status === "failed") return generationFailed(GENERATION_FAILED);
+  if (found.status === "failed") {
+    return generationFailed(found.job?.error_message ?? GENERATION_FAILED);
+  }
   // Queued or running: it was started earlier (the page was reloaded, or in another tab).
-  // Asking for it again starts nothing new and answers with the job to follow.
+  // Asking for it again starts nothing new and answers with the job to follow. POST is used
+  // instead of the job in the GET answer because it also hands a job that is still waiting to
+  // the queue again, should the first attempt to queue it have been lost.
   return requestedView(choice);
 }
 

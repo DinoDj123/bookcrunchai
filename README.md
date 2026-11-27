@@ -123,9 +123,11 @@ All under `/api/v1`; the full reference is the OpenAPI page at `/api/v1/docs`.
 | `POST /books` | Upload an EPUB or PDF (multipart field `file`, at most 50 MB): 202 with the book and its job, or 200 with the existing book if this user already uploaded the same file |
 | `POST /books/{id}/retry` | Process a failed book again: 202 with the book and its job, 409 `BOOK_NOT_FAILED` for a book that is being processed or is ready, 503 `QUEUE_UNAVAILABLE` if it cannot be queued now (the book stays `failed`) |
 | `GET /books` | The library: own books and demo books, newest first (`is_demo` tells them apart) |
-| `GET /books/{id}` | One book with `chapter_count`, `active_job` (the job to poll, or null), `error_message` of a failed book and usage totals |
+| `GET /books/{id}` | One book with `chapter_count`, `active_job` (the processing job to poll, or null; summary jobs are not included), `error_message` of a failed book and usage totals |
 | `GET /books/{id}/chapters` | Table of contents: `position`, `title`, `kind`, `word_count`, `has_notes` |
 | `GET /books/{id}/usage` | Tokens and estimated cost by pipeline step and in total; `cost_usd` is a decimal string |
+| `POST /books/{id}/summaries` | Body `{"length": "5min"\|"15min", "language": "en"\|"cnr"}`. 200 with the summary if it is ready (from the cache, no LLM cost); otherwise 202 with `summary` and the `job` to poll. A failed summary is queued again; 409 `BOOK_NOT_READY` before the book is processed |
+| `GET /books/{id}/summaries?length=&language=` | The summary in any state: `overview`, `chapters`, `key_ideas`, `word_count`, and while it is not ready its latest `job` (stage, progress, error); 404 `SUMMARY_NOT_FOUND` if never requested |
 | `GET /jobs/{id}` | Status, stage and progress of a job; poll it while the job runs |
 
 Rate limits (429 `RATE_LIMITED`, with `details.retry_after_seconds` and a `Retry-After` header):
@@ -181,6 +183,23 @@ writes status, results and errors back. PostgreSQL is the only place where job s
   is started again only when ARQ's lock on it expires, about 10 minutes later.
 - With `BOOKCRUNCH_PARSER=fake`, set `FAKE_PARSER_DELAY=3` or `FAKE_PARSER_ERROR=NO_TEXT_LAYER` on
   the worker to see a slow or a failing job (`docs/contracts/parse_book.md`, section 6).
+
+`generate_summary` makes one book summary (FR-008) for one length and language, from the chapter
+notes, with the strong model (`LLM_MODEL_STRONG`); `job.params` names the summary. It runs only
+when `POST /books/{id}/summaries` asks for a summary that is not ready.
+
+- The result must have an overview, chapter summaries of known chapters (each at most once; a
+  chapter the model left out is accepted), 1,100 or 3,300 words ±15 % in all, and 5–10 or 10–15
+  key ideas. A key idea of an unknown chapter is dropped. An invalid result gets one more call,
+  then the job fails with `SUMMARY_INVALID`.
+- The summary, its chapter summaries and key ideas are stored in the commit that marks the job
+  done, so a summary is never half stored. A ready summary is never made again.
+- A failed job marks the summary `failed` and leaves the book `ready`; asking again starts a new
+  job. LLM errors are handled as for chapter notes; `fail_stale_jobs` covers summary jobs too.
+- **Temporary:** the reduce step is a fake (`BOOKCRUNCH_SUMMARY=fake`) that returns a summary of
+  exactly the target length from the notes' own words, without an LLM call. Track A writes the
+  real prompt (`write_book_summary` in the draft contract). `FAKE_SUMMARY_DELAY=5` makes the fake
+  wait, to see the job in the UI.
 
 ## Parsing
 

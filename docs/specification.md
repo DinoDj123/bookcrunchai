@@ -1115,15 +1115,26 @@ Details of the main endpoints:
 </tr>
 <tr class="odd">
 <td><strong>Success Response</strong></td>
-<td><p>200 OK – { id, status: "ready", length, language, overview, chapters: [ { chapter_position, title, content } ], key_ideas: [ { text, chapter_position } ], word_count } when cached</p>
-<p>202 Accepted – { summary: { id, status }, job: { id, status } } when generation was queued</p></td>
+<td><p>200 OK – { id, status: "ready", length, language, overview, chapters: [ { chapter_position, title, content } ], key_ideas: [ { text, chapter_position } ], word_count, job: null } when cached</p>
+<p>202 Accepted – { summary: { id, status }, job: { id, status } } when generation was queued or is already running; a failed summary is queued again with a new job</p></td>
 </tr>
 <tr class="even">
 <td><strong>Error Responses</strong></td>
-<td>401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND, 409 BOOK_NOT_READY, 422 VALIDATION_ERROR</td>
+<td>401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND, 409 BOOK_NOT_READY, 422 VALIDATION_ERROR, 503 QUEUE_UNAVAILABLE</td>
 </tr>
 </tbody>
 </table>
+
+| **Field**            | **Value**                                                                                                                                                                                                 |
+|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Endpoint**         | GET /api/v1/books/{id}/summaries                                                                                                                                                                          |
+| **Description**      | Read the summary for a length and language in any state (queued, running, ready, failed).                                                                                                                |
+| **Auth Required**    | Yes – session cookie                                                                                                                                                                                      |
+| **Path Parameters**  | id: UUID – book ID                                                                                                                                                                                        |
+| **Query Parameters** | length: "5min" \| "15min"; language: "en" \| "cnr" (both required)                                                                                                                                         |
+| **Request Body**     | N/A                                                                                                                                                                                                       |
+| **Success Response** | 200 OK – the body of POST’s 200 answer. Until the summary is ready, overview and word_count are null, chapters and key_ideas are empty, and job is its latest job { id, status, stage, progress, error_code, error_message } |
+| **Error Responses**  | 401 UNAUTHENTICATED, 404 BOOK_NOT_FOUND, 404 SUMMARY_NOT_FOUND, 422 VALIDATION_ERROR                                                                                                                       |
 
 | **Field**            | **Value**                                                                                                                                  |
 |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1444,6 +1455,7 @@ Significant decisions and the alternatives that were rejected.
 | Citations          | Model returns chunk number and verbatim quote; backend verifies the quote | Trusting citations without checking: a wrong citation is worse than none. (The built-in citations feature of the Claude API, planned as an alternative, is no longer available with open-weight models.) |
 | Authentication     | Email and password, JWT in httpOnly cookie (confirmed by the mentors)     | Anonymous sessions: simpler, but private books would be tied to one browser. Token in local storage: readable by scripts.                                                 |
 | Caching scope      | Per user and book                                                         | Sharing results between users who upload the same file: saves cost but complicates the privacy rules.                                                                     |
+| Summary generation | POST /books/{id}/summaries saves the summary as “queued” and a generate_summary job; the worker runs the reduce step, validates the result (one more call if it is invalid) and stores overview, chapter summaries and key ideas in one commit. A ready summary is answered from the database. The row is created with INSERT … ON CONFLICT DO NOTHING and then locked, so two requests at once make one summary and one job. A failed summary is queued again with a new job and leaves the book ready. Every reader of a demo book can request its summaries, which all its readers share | Generating inside the request: a reduce call on an open-weight model can take minutes and would be lost on a timeout. Generating all four summaries in process_book: four times the reduce cost for combinations nobody may ask for. Re-queuing the failed job under its own ID: the queue may still hold that ID, and the failed job is the record of what went wrong. Demo summaries only from the team: the demo would need a separate admin step. |
 | File storage       | Local disk volume (a Railway volume on the backend service)               | Object storage (S3): one more service and client library for a small demo. Files in PostgreSQL: changes the upload, the worker and the data model, and makes the database much larger. |
 | Status updates     | Polling                                                                   | WebSockets or server-sent events: more moving parts for little gain.                                                                                                      |
 | Deployment         | Railway, as proposed by the mentors: Caddy as the only public service in front of the frontend and the backend; API and worker in one backend service that owns the volume (proposed, to be confirmed by the team) | One Linux VM with Docker Compose (versions 1.0–1.5): replaced by the mentors’ choice. Frontend and API on separate public Railway domains: cross-origin cookies. API and worker as separate Railway services: a volume can be attached to one service only, so the worker could not read the uploaded files. |

@@ -286,7 +286,7 @@ async def fake_write_book_summary(
         KeyIdeaDraft(f"Fake key idea {n}.", chapters[(n - 1) % len(chapters)].position)
         for n in range(1, fewest + 1)
     )
-    overview = f"Fake {language.value} overview of “{title}” from {len(chapters)} chapters."
+    overview = f"Fake {language} overview of “{title}” from {len(chapters)} chapters."
     used = count_words(overview) + sum(count_words(idea.text) for idea in key_ideas)
     share, extra = divmod(TARGET_WORDS[length] - used, len(chapters))
     summaries = tuple(

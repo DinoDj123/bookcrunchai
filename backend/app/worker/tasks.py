@@ -3,8 +3,10 @@ a task gets only the job ID from the queue, reads its input from the database an
 progress and results back to it.
 
 process_book runs the stages parsing -> chunking -> chapter notes (Appendix C) and then marks the
-book ready. Embedding is added in week 3. Chunking and chapter notes come from Track A; until
-their contract is agreed, the worker uses the fakes in app.worker.pipeline_draft.
+book ready. Embedding is added in week 3. generate_summary runs the reduce step for one summary
+(FR-008): one length and one language, from the chapter notes. Chunking, chapter notes and the
+reduce step come from Track A; until their contract is agreed, the worker uses the fakes in
+app.worker.pipeline_draft.
 
 Every stage is stored as soon as it is finished, and a retried job continues from there
 (specification 4.5): a book that already has chunks is not parsed or chunked again, and only the
@@ -36,7 +38,22 @@ from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.db.models import Book, BookStatus, Chapter, Chunk, Job, JobStage, JobStatus, JobType
+from app.db.models import (
+    Book,
+    BookStatus,
+    Chapter,
+    ChapterSummary,
+    Chunk,
+    Job,
+    JobStage,
+    JobStatus,
+    JobType,
+    KeyIdea,
+    Language,
+    Summary,
+    SummaryLength,
+    SummaryStatus,
+)
 from app.llm.base import LLMClient, LLMError, LLMErrorCode
 from app.llm.factory import make_llm_client
 from app.llm.fake import FakeLLMClient
@@ -53,17 +70,31 @@ from app.worker.jobs import GENERIC_ERROR_MESSAGE, INTERNAL_ERROR, MAX_TRIES, Jo
 # TEMPORARY: from app.pipeline once the chunking contract is agreed with Track A (see the module).
 from app.worker.pipeline_draft import (
     ChapterForNotes,
+    ChapterForSummary,
     ChunkDraft,
     PipelineContractViolation,
+    SummaryDraft,
+    WriteBookSummaryFn,
     WriteChapterNotesFn,
+    drop_invalid_key_ideas,
     get_chunk_chapter,
+    get_write_book_summary,
     get_write_chapter_notes,
     notes_implementation,
+    summary_implementation,
+    summary_word_count,
     validate_chapter_notes,
     validate_chunks,
+    validate_summary,
 )
 
-__all__ = ["GENERIC_ERROR_MESSAGE", "MAX_TRIES", "fail_stale_jobs", "process_book"]
+__all__ = [
+    "GENERIC_ERROR_MESSAGE",
+    "MAX_TRIES",
+    "fail_stale_jobs",
+    "generate_summary",
+    "process_book",
+]
 
 # ARQ stops a task that runs longer than this (WorkerSettings.job_timeout).
 JOB_TIMEOUT_SECONDS = 600
@@ -93,9 +124,18 @@ CHUNKER_CONTRACT_VIOLATION = "CHUNKER_CONTRACT_VIOLATION"
 CHUNKER_INTERNAL_ERROR = "CHUNKER_INTERNAL_ERROR"
 NOTES_CONTRACT_VIOLATION = "NOTES_CONTRACT_VIOLATION"
 NOTES_INTERNAL_ERROR = "NOTES_INTERNAL_ERROR"
+NO_CHAPTER_NOTES = "NO_CHAPTER_NOTES"
+SUMMARY_INVALID = "SUMMARY_INVALID"
+SUMMARY_INTERNAL_ERROR = "SUMMARY_INTERNAL_ERROR"
 
 COST_LIMIT_MESSAGE = "This book has reached its cost limit for AI processing."
 LLM_UNAVAILABLE_MESSAGE = "The AI service is not available at the moment. Please try again later."
+SUMMARY_INVALID_MESSAGE = "The AI did not produce a usable summary. Please try again."
+
+# FR-008: a result that fails validation gets one more call, then the summary fails.
+SUMMARY_ATTEMPTS = 2
+# summaries.model of a summary written by the fake reduce step, which calls no model.
+FAKE_MODEL = "fake"
 
 logger = logging.getLogger(__name__)
 
@@ -321,14 +361,7 @@ async def _call_notes(
         notes = await write(chapter, language=language, llm=llm, model=model)
         validate_chapter_notes(notes)
     except LLMError as error:
-        if error.code == LLMErrorCode.COST_LIMIT_EXCEEDED:
-            raise JobFailed(error.code.value, COST_LIMIT_MESSAGE) from error
-        if not error.retryable:
-            logger.error("Job %s, chapter %s: %s", job.id, chapter.position, error.message)
-            raise JobFailed(error.code.value) from error
-        if ctx["job_try"] >= MAX_TRIES:
-            # The client has already tried every call several times, in every try of the job.
-            raise JobFailed(error.code.value, LLM_UNAVAILABLE_MESSAGE) from error
+        _fail_on_llm_error(ctx, job, error, f"chapter {chapter.position}")
         raise  # run_job tries the job again later; the notes written so far stay
     except PipelineContractViolation as error:
         logger.exception("Job %s, chapter %s: notes break the contract", job.id, chapter.position)
@@ -339,12 +372,168 @@ async def _call_notes(
     return notes
 
 
+def _fail_on_llm_error(ctx: dict[str, Any], job: Job, error: LLMError, where: str) -> None:
+    """Raise JobFailed for an LLM error the job should fail on now. Returns for an error worth
+    another try of the job; the caller then re-raises it and run_job has ARQ try again."""
+    if error.code == LLMErrorCode.COST_LIMIT_EXCEEDED:
+        raise JobFailed(error.code.value, COST_LIMIT_MESSAGE) from error
+    if not error.retryable:
+        logger.error("Job %s, %s: %s", job.id, where, error.message)
+        raise JobFailed(error.code.value) from error
+    if ctx["job_try"] >= MAX_TRIES:
+        # The client has already tried every call several times, in every try of the job.
+        raise JobFailed(error.code.value, LLM_UNAVAILABLE_MESSAGE) from error
+
+
 async def _fail(session: AsyncSession, job: Job) -> None:
     """run_job's on_failure: the book of a failed process_book job fails with it, in the same
     transaction, so a book never stays in "processing" (specification 4.5)."""
     book = await session.get_one(Book, job.book_id)
     book.status = BookStatus.FAILED
     book.error_code = job.error_code
+
+
+# --------------------------------------------------------------------------- book summary
+
+
+async def generate_summary(ctx: dict[str, Any], job_id: str) -> None:
+    """Write the summary of a generate_summary job (FR-008) from the book's chapter notes.
+
+    job.params holds summary_id, length and language; the API has saved the summary as "queued".
+    A summary that is already ready is left as it is (FR-014). A failed job fails its summary;
+    the book stays ready, because the book itself is fine.
+    """
+    await run_job(ctx, job_id, _summarise, on_failure=_fail_summary)
+
+
+def _summary_id(job: Job) -> uuid.UUID | None:
+    value = (job.params or {}).get("summary_id")
+    return uuid.UUID(value) if value else None
+
+
+async def _summarise(ctx: dict[str, Any], session: AsyncSession, job: Job) -> None:
+    summary_id = _summary_id(job)
+    summary = await session.get(Summary, summary_id) if summary_id else None
+    if summary is None:
+        raise JobFailed(INTERNAL_ERROR)  # the API always saves the summary first
+    if summary.status == SummaryStatus.READY:
+        return
+    book = await session.get_one(Book, job.book_id)
+    summary.status = SummaryStatus.RUNNING
+    job.stage = JobStage.REDUCE
+    await session.commit()
+
+    rows = await session.scalars(
+        select(Chapter)
+        .where(
+            Chapter.book_id == book.id,
+            Chapter.kind.in_(NOTES_KINDS),
+            Chapter.notes.is_not(None),
+        )
+        .order_by(Chapter.position)
+    )
+    chapters = tuple(ChapterForSummary(c.position, c.title, c.notes or "") for c in rows)
+    if not chapters:
+        raise JobFailed(NO_CHAPTER_NOTES)
+
+    fake = summary_implementation() == "fake"
+    llm: LLMClient = (
+        FakeLLMClient() if fake else make_llm_client(ctx["session_factory"], book.id, job.id)
+    )
+    model = get_settings().llm_model_strong
+    draft = await _call_summary(
+        ctx,
+        job,
+        get_write_book_summary(),
+        book.title,
+        chapters,
+        SummaryLength(summary.length),
+        Language(summary.language),
+        llm,
+        model,
+    )
+    await _save_summary(session, summary, draft, FAKE_MODEL if fake else model)
+
+
+async def _call_summary(
+    ctx: dict[str, Any],
+    job: Job,
+    write: WriteBookSummaryFn,
+    title: str,
+    chapters: tuple[ChapterForSummary, ...],
+    length: SummaryLength,
+    language: Language,
+    llm: LLMClient,
+    model: str,
+) -> SummaryDraft:
+    """A valid summary, with at most SUMMARY_ATTEMPTS calls, and every failure turned into what
+    the job should do."""
+    positions = {chapter.position for chapter in chapters}
+    for attempt in range(1, SUMMARY_ATTEMPTS + 1):
+        try:
+            draft = await write(
+                title, chapters, length=length, language=language, llm=llm, model=model
+            )
+            draft = drop_invalid_key_ideas(draft, positions)
+            validate_summary(draft, positions, length)
+            return draft
+        except LLMError as error:
+            _fail_on_llm_error(ctx, job, error, "summary")
+            raise
+        except PipelineContractViolation as error:
+            logger.warning("Job %s: summary attempt %s is invalid: %s", job.id, attempt, error)
+            if attempt == SUMMARY_ATTEMPTS:
+                raise JobFailed(SUMMARY_INVALID, SUMMARY_INVALID_MESSAGE) from error
+        except Exception as error:
+            logger.exception("Job %s: the reduce step raised an unexpected error", job.id)
+            raise JobFailed(SUMMARY_INTERNAL_ERROR) from error
+    raise AssertionError("unreachable")  # the last attempt returns or raises
+
+
+async def _save_summary(
+    session: AsyncSession, summary: Summary, draft: SummaryDraft, model: str
+) -> None:
+    """Store the summary with its chapter summaries and key ideas. Not committed here: run_job
+    commits it together with the job becoming "done", so a summary is never half stored."""
+    # Nothing should be there, but a summary must never show two sets of rows.
+    await session.execute(delete(ChapterSummary).where(ChapterSummary.summary_id == summary.id))
+    await session.execute(delete(KeyIdea).where(KeyIdea.summary_id == summary.id))
+    rows = await session.execute(
+        select(Chapter.position, Chapter.id).where(Chapter.book_id == summary.book_id)
+    )
+    chapter_ids = {position: chapter_id for position, chapter_id in rows}
+    session.add_all(
+        ChapterSummary(
+            book_id=summary.book_id,
+            summary_id=summary.id,
+            chapter_id=chapter_ids[chapter.chapter_position],
+            content=chapter.content.strip(),
+        )
+        for chapter in draft.chapters
+    )
+    session.add_all(
+        KeyIdea(
+            book_id=summary.book_id,
+            summary_id=summary.id,
+            chapter_id=chapter_ids[idea.chapter_position],
+            position=position,
+            text=idea.text.strip(),
+        )
+        for position, idea in enumerate(draft.key_ideas, start=1)
+    )
+    summary.overview = draft.overview.strip()
+    summary.word_count = summary_word_count(draft)
+    summary.model = model
+    summary.status = SummaryStatus.READY
+
+
+async def _fail_summary(session: AsyncSession, job: Job) -> None:
+    """run_job's on_failure for generate_summary: the summary fails with its job, in the same
+    transaction. A new POST for the same length and language starts it again."""
+    summary_id = _summary_id(job)
+    summary = await session.get(Summary, summary_id) if summary_id else None
+    if summary is not None and summary.status != SummaryStatus.READY:
+        summary.status = SummaryStatus.FAILED
 
 
 async def fail_stale_jobs(ctx: dict[str, Any]) -> int:
@@ -375,6 +564,8 @@ async def fail_stale_jobs(ctx: dict[str, Any]) -> int:
             if job.type == JobType.PROCESS_BOOK and book.status == BookStatus.PROCESSING:
                 book.status = BookStatus.FAILED
                 book.error_code = INTERNAL_ERROR
+            if job.type == JobType.GENERATE_SUMMARY:
+                await _fail_summary(session, job)
             failed += 1
         await session.commit()
         return failed

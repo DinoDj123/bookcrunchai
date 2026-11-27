@@ -16,9 +16,9 @@ If a task needs a change in the other track, stop and say so instead of editing 
 
 | Area | Owner |
 |---|---|
-| `backend/app/parsing/` except the shared files below, `backend/tests/parsing/` except `test_contract.py`, `backend/tests/fixtures/books/`, later the LLM pipeline (chunking, prompts, summaries, retrieval) | **Track A — Dino Đerekerac** |
-| `frontend/`, `backend/app/api/`, `backend/app/db/`, `backend/app/worker/`, `backend/app/core/`, migrations, Docker, CI, README | **Track B — Daris Velović** |
-| **Shared contract:** `backend/app/parsing/contract.py`, `backend/app/parsing/__init__.py`, `backend/app/parsing/fake.py`, `backend/tests/parsing/test_contract.py`, `docs/contracts/` | **Both — change only with agreement** |
+| `backend/app/parsing/` except the shared files below, `backend/tests/parsing/` except `test_contract.py`, `backend/tests/fixtures/books/`, `backend/app/pipeline/` except the shared files below (with `backend/app/pipeline/prompts/`), `backend/tests/pipeline/` except `test_contract.py`, `backend/app/api/summaries.py`, `backend/app/worker/summary_task.py`, `frontend/src/components/summary/`, `backend/scripts/pipeline_*.py`, later the rest of the LLM pipeline (summaries, retrieval) | **Track A — Dino Đerekerac** |
+| `frontend/` except `src/components/summary/`, `backend/app/api/` except `summaries.py`, `backend/app/db/`, `backend/app/worker/` except `summary_task.py`, `backend/app/core/`, migrations, Docker, CI, README | **Track B — Daris Velović** |
+| **Shared contracts:** `backend/app/parsing/contract.py`, `backend/app/parsing/__init__.py`, `backend/app/parsing/fake.py`, `backend/tests/parsing/test_contract.py`, `backend/app/pipeline/contract.py`, `backend/app/pipeline/__init__.py`, `backend/app/pipeline/fake.py`, `backend/tests/pipeline/test_contract.py`, `docs/contracts/` | **Both — change only with agreement** |
 
 ## The parse_book contract (must follow)
 
@@ -33,6 +33,24 @@ Read `docs/contracts/parse_book.md` before touching parsing or the worker.
   `validate_parsed_book()` before saving. Map errors exactly as in section 5 of the contract.
   Do not depend on anything that is not in `contract.py`.
 - `pytest backend/tests/parsing/test_contract.py` must pass on every pull request.
+
+## The pipeline contract (must follow)
+
+Read `docs/contracts/pipeline.md` before touching chunking, chapter notes or the worker stages that
+call them. The same rules for shared files apply as for `parse_book`.
+
+- Track A: `chunk_chapter(chapter) -> tuple[ChunkDraft, ...]` in `backend/app/pipeline/chunking.py`
+  and `write_chapter_notes(chapter, *, language, llm, model, budget_tokens) -> str` in
+  `backend/app/pipeline/notes.py`. Use `count_words()` and `estimate_tokens()` from the contracts.
+  Chunking is pure (no database, network or file writes) and raises nothing. Notes call the model
+  only through `llm`, pass `LLMError` on unchanged and raise
+  `LLMError(LLM_REQUEST_FAILED, retryable=True)` after two invalid answers. Every test book must
+  pass `validate_chunks()`.
+- Track B: get the functions only through `get_chunk_chapter()` and `get_write_chapter_notes()`
+  from `app.pipeline`. Call `validate_chunks()` / `validate_chapter_notes()` before saving. Write
+  notes only for chapters where `needs_notes(kind)` is true, with `budget_tokens` from the
+  settings. Map errors as in sections 4 and 7 of the contract.
+- `pytest backend/tests/pipeline/test_contract.py` must pass on every pull request.
 
 ## General rules
 

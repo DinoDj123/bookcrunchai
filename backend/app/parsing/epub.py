@@ -47,6 +47,7 @@ _SKIPPED_TAGS = frozenset(
     {"script", "style", "nav", "img", "svg", "figure", "figcaption", "head", "title", "noscript"}
 )
 _SKIPPED_EPUB_TYPES = frozenset({"footnote", "endnote", "rearnote", "pagebreak"})
+_OPS_NAMESPACE = "http://www.idpf.org/2007/ops"  # namespace of the epub: prefix
 # Illustration captions (Gutenberg puts them even inside chapter headings:
 # <h2><span class="caption">I hope Mr. Bingley will like it.</span><br/>CHAPTER II.</h2>).
 _SKIPPED_CLASSES = frozenset({"caption"})
@@ -353,7 +354,7 @@ def _read_toc(archive: zipfile.ZipFile, package: _Package) -> list[TocEntry]:
 def _read_nav(data: bytes, nav_path: str) -> list[TocEntry]:
     soup = _parse_xhtml(data)
     navs = soup.find_all("nav")
-    toc_nav = next((n for n in navs if "toc" in str(n.get("epub:type", "")).split()), None)
+    toc_nav = next((n for n in navs if "toc" in _epub_types(n)), None)
     if toc_nav is None:
         toc_nav = navs[0] if navs else None
     if toc_nav is None:
@@ -447,6 +448,24 @@ def _classes(tag: Tag) -> set[str]:
     return set(value.split()) if isinstance(value, str) else set(value)
 
 
+def _epub_types(tag: Tag) -> set[str]:
+    """Values of the epub:type attribute, whatever the parser calls it.
+
+    The HTML parser keeps the key "epub:type"; the XML parser gives a NamespacedAttribute
+    whose prefix is lost with lxml 6.2 (key "type"), so the OPS namespace is checked as well.
+    A plain "type" attribute without that namespace (<ol type="1">) is not epub:type.
+    """
+    values: list[str] = []
+    for key, value in tag.attrs.items():
+        if (
+            key == "epub:type"
+            or getattr(key, "namespace", None) == _OPS_NAMESPACE
+            and getattr(key, "name", None) == "type"
+        ):
+            values.extend(str(value).split())
+    return set(values)
+
+
 def _is_boilerplate(tag: Tag) -> bool:
     if tag.get("id") in GUTENBERG_IDS:
         return True
@@ -456,7 +475,7 @@ def _is_boilerplate(tag: Tag) -> bool:
 def _is_skipped(tag: Tag) -> bool:
     if tag.name in _SKIPPED_TAGS or _classes(tag) & _SKIPPED_CLASSES:
         return True
-    epub_types = set(str(tag.get("epub:type", "")).split())
+    epub_types = _epub_types(tag)
     if epub_types & _SKIPPED_EPUB_TYPES:
         return True
     return tag.get("role") == "doc-pagebreak"

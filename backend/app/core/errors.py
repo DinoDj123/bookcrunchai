@@ -24,24 +24,31 @@ class AppError(Exception):
         code: str,
         message: str,
         details: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
         self.details = details or {}
+        # Extra response headers, for example Retry-After on 429.
+        self.headers = headers
 
 
 def error_response(
-    status_code: int, code: str, message: str, details: dict[str, Any] | None = None
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     body = {"error": {"code": code, "message": message, "details": details or {}}}
-    return JSONResponse(content=body, status_code=status_code)
+    return JSONResponse(content=body, status_code=status_code, headers=headers)
 
 
 async def _app_error(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AppError)
-    return error_response(exc.status_code, exc.code, exc.message, exc.details)
+    return error_response(exc.status_code, exc.code, exc.message, exc.details, exc.headers)
 
 
 async def _validation_error(_: Request, exc: Exception) -> JSONResponse:

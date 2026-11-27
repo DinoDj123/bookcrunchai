@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Largest accepted book file (FR-002). The proxy has the same limit (proxy/Caddyfile).
     max_upload_bytes: int = 50 * 1024 * 1024
 
+    # Rate limits (section 4.2, app.api.rate_limit): login attempts per client address per minute,
+    # uploads per user per hour.
+    login_rate_limit: int = 10
+    upload_rate_limit: int = 20
+
     # Signs the session JWT (section 7.3). Must be overridden outside local development.
     jwt_secret: str = "change-me-local-only"
 

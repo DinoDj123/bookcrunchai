@@ -69,7 +69,8 @@ class BookOut(BaseModel):
     chapter_count: int
     word_count: int | None
     is_demo: bool
-    # The job to poll (GET /jobs/{id}): queued or running. None when nothing is being done.
+    # The processing job to poll (GET /jobs/{id}): queued or running. None when the book is not
+    # being processed.
     active_job: ActiveJob | None
     usage: Usage
 
@@ -139,9 +140,15 @@ async def get_book(book: ReadableBook, session: SessionDep) -> BookOut:
     chapter_count = await session.scalar(
         select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id)
     )
+    # Only processing: a summary being made has its own job (GET /books/{id}/summaries) and does
+    # not make the book look unfinished.
     active_job = await session.scalar(
         select(Job)
-        .where(Job.book_id == book.id, Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
+        .where(
+            Job.book_id == book.id,
+            Job.type == JobType.PROCESS_BOOK,
+            Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+        )
         .order_by(Job.created_at.desc())
         .limit(1)
     )

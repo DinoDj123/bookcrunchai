@@ -70,7 +70,7 @@ async def test_status_follows_the_worker(
     await process_book(worker_ctx, job_id)
     job = (await client.get(f"/api/v1/jobs/{job_id}")).json()
 
-    assert (job["status"], job["stage"], job["progress"]) == ("done", "parsing", 100)
+    assert (job["status"], job["stage"], job["progress"]) == ("done", "chapter_notes", 100)
     assert job["error_code"] is None
     # Timestamps are ISO 8601 with a UTC offset (specification 7.1).
     started = datetime.fromisoformat(job["started_at"])

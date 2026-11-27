@@ -9,10 +9,10 @@ from typing import Any
 
 import arq
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import Book, Chapter, Job
+from app.db.models import Book, Chapter, Chunk, Job
 from app.parsing import ParsedBook, ParseErrorCode
 from app.parsing.contract import USER_MESSAGES
 from app.parsing.fake import fake_parse_book
@@ -43,6 +43,13 @@ def assert_failed(job: Job, book: Book, code: str, message: str) -> None:
     assert job.finished_at is not None
     assert book.status == "failed"
     assert book.error_code == code
+
+
+async def without_chunks(session: AsyncSession, book: Book) -> None:
+    """A book processed before chunking existed (week 1): chapters, no chunks. A new job parses it
+    again; a book that has chunks continues from the chapter notes instead."""
+    await session.execute(delete(Chunk).where(Chunk.book_id == book.id))
+    await session.flush()
 
 
 def break_saving(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,6 +149,7 @@ async def test_failed_parse_keeps_existing_chapters_untouched(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await process_book(ctx, str(queued_job.id))
+    await without_chunks(session, book)
     second_job = make_job(book)
     session.add(second_job)
     await session.flush()
@@ -220,13 +228,14 @@ async def test_failed_save_rolls_back_and_keeps_the_old_chapters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await process_book(ctx, str(queued_job.id))
+    await without_chunks(session, book)
     second_job = make_job(book)
     session.add(second_job)
     await session.flush()
     real_save = tasks._save_parsed_book
 
-    async def save_then_break(db: AsyncSession, saved_book: Book, parsed: ParsedBook) -> None:
-        await real_save(db, saved_book, parsed)
+    async def save_then_break(db: AsyncSession, saved_book: Book, *rest: Any) -> None:
+        await real_save(db, saved_book, *rest)
         saved_book.title = "Half saved"
         await db.flush()  # the old chapters are deleted and the new ones written, then it breaks
         raise RuntimeError("database is gone")

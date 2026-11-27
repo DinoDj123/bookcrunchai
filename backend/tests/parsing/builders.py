@@ -38,9 +38,12 @@ def _nav_entries(nav: list[NavEntry]) -> list[tuple[str, str, int]]:
     return [(e[0], e[1], e[2] if len(e) == 3 else 1) for e in nav]
 
 
-def _nav_xhtml(nav: list[NavEntry]) -> str:
-    """EPUB3 nav document with nested <ol> lists following the entry levels."""
-    lines = ['<nav epub:type="toc" id="toc"><h1>Contents</h1>']
+def _nav_xhtml(nav: list[NavEntry], before: str = "") -> str:
+    """EPUB3 nav document with nested <ol> lists following the entry levels.
+
+    `before` is HTML put in front of the toc <nav> (for example a landmarks <nav>).
+    """
+    lines = [before, '<nav epub:type="toc" id="toc"><h1>Contents</h1>']
     depth = 0
     for title, href, level in _nav_entries(nav):
         if level > depth:
@@ -88,6 +91,7 @@ def make_epub(
     language: str | None = "en",
     docs: list[tuple[str, str]],
     nav: list[NavEntry] | None = None,
+    nav_before: str = "",
     ncx: bool = False,
     encryption_xml: str | None = None,
     name: str = "book.epub",
@@ -96,6 +100,7 @@ def make_epub(
 
     `docs` are (file name, body HTML) pairs in spine order, stored under OEBPS/.
     `nav` entries become an EPUB3 nav document, or an EPUB2 NCX instead when `ncx` is True.
+    `nav_before` is HTML put in the nav document in front of the toc <nav>.
     `author_file_as` adds an EPUB3 `file-as` refinement to the creator.
     """
     metadata = []
@@ -151,7 +156,7 @@ def make_epub(
             # hrefs in the OPF are URL-encoded, names inside the zip are not.
             archive.writestr(f"OEBPS/{unquote(doc_name)}", content, zipfile.ZIP_DEFLATED)
         if nav is not None and not ncx:
-            archive.writestr("OEBPS/nav.xhtml", _nav_xhtml(nav), zipfile.ZIP_DEFLATED)
+            archive.writestr("OEBPS/nav.xhtml", _nav_xhtml(nav, nav_before), zipfile.ZIP_DEFLATED)
         if nav is not None and ncx:
             archive.writestr("OEBPS/toc.ncx", _ncx(nav), zipfile.ZIP_DEFLATED)
     return path

@@ -4,13 +4,14 @@ import uuid
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import SESSION_COOKIE, CurrentUser, SessionDep, SettingsDep
+from app.api.rate_limit import limit_logins
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.security import (
@@ -89,7 +90,7 @@ async def register(
     return UserOut(id=user.id, email=user.email)
 
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(limit_logins)])
 async def login(
     body: Credentials, response: Response, session: SessionDep, settings: SettingsDep
 ) -> UserOut:

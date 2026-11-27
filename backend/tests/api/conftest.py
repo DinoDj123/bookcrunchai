@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import get_queue
+from app.api.rate_limit import get_request_counter
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.main import app
@@ -20,17 +21,41 @@ UPLOAD_LIMIT = 1024  # bytes; small, so the "too large" tests stay fast
 
 
 class FakeQueue:
-    """Stands in for the ARQ pool: records what was enqueued, or fails like Redis being down."""
+    """Stands in for the ARQ pool: records what was enqueued, fails like Redis being down, or
+    answers like ARQ does when it still holds a job with the same ID."""
 
     def __init__(self) -> None:
         self.fail = False
+        self.held = False
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
 
     async def enqueue_job(self, function: str, *args: Any, **kwargs: Any) -> object:
         if self.fail:
             raise ConnectionError("redis is down")
         self.calls.append((function, args, kwargs))
-        return object()
+        return None if self.held else object()
+
+
+class FakeCounter:
+    """Stands in for RequestCounter: counts in memory (the window never ends during a test), or
+    fails like Redis being down."""
+
+    WINDOW_LEFT = 42  # seconds, reported for every key
+
+    def __init__(self) -> None:
+        self.fail = False
+        self.counts: dict[str, int] = {}
+
+    async def hit(self, key: str, window_seconds: int) -> tuple[int, int]:
+        if self.fail:
+            raise ConnectionError("redis is down")
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key], self.WINDOW_LEFT
+
+    async def peek(self, key: str) -> tuple[int, int]:
+        if self.fail:
+            raise ConnectionError("redis is down")
+        return self.counts.get(key, 0), self.WINDOW_LEFT
 
 
 @pytest.fixture
@@ -50,8 +75,16 @@ def queue() -> FakeQueue:
 
 
 @pytest.fixture
+def counter() -> FakeCounter:
+    return FakeCounter()
+
+
+@pytest.fixture
 async def client(
-    session_factory: async_sessionmaker[AsyncSession], settings: Settings, queue: FakeQueue
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    queue: FakeQueue,
+    counter: FakeCounter,
 ) -> AsyncIterator[AsyncClient]:
     async def session_for_request() -> AsyncIterator[AsyncSession]:
         async with session_factory() as db_session:
@@ -60,6 +93,7 @@ async def client(
     app.dependency_overrides[get_session] = session_for_request
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_queue] = lambda: queue
+    app.dependency_overrides[get_request_counter] = lambda: counter
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
         yield http
     app.dependency_overrides.clear()

@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = 5
     # One attempt of one LLM request; a call is tried up to 3 times.
     llm_timeout_seconds: float = 180
+    # Rate limits (section 4.2, app.api.rate_limit): login attempts per client address per minute,
+    # uploads per user per hour.
+    login_rate_limit: int = 10
+    upload_rate_limit: int = 20
 
     # Signs the session JWT (section 7.3). Must be overridden outside local development.
     jwt_secret: str = "change-me-local-only"

@@ -4,13 +4,14 @@ import uuid
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import SESSION_COOKIE, CurrentUser, SessionDep, SettingsDep
+from app.api.rate_limit import limit_logins, limit_registrations
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.security import (
@@ -71,7 +72,7 @@ def _hash_for_unknown_email() -> str:
     return hash_password("no account has this password")
 
 
-@router.post("/register", status_code=201)
+@router.post("/register", status_code=201, dependencies=[Depends(limit_registrations)])
 async def register(
     body: NewAccount, response: Response, session: SessionDep, settings: SettingsDep
 ) -> UserOut:
@@ -89,7 +90,7 @@ async def register(
     return UserOut(id=user.id, email=user.email)
 
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(limit_logins)])
 async def login(
     body: Credentials, response: Response, session: SessionDep, settings: SettingsDep
 ) -> UserOut:

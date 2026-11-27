@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api import rate_limit
 from app.api.rate_limit import LOGIN_WINDOW_SECONDS, RequestCounter
 from app.core.config import Settings
-from app.db.models import Book
+from app.db.models import Book, User
 from app.worker.tasks import process_book
 from tests.api.conftest import EMAIL, PASSWORD, FakeCounter, register
 
@@ -219,3 +219,42 @@ async def test_unavailable_counter_is_logged_without_the_client_address(
     assert "login" in args
     assert "127.0.0.1" not in str(args)  # the address httpx's test transport reports
     assert kwargs == {}  # no traceback: this is written on every request while Redis is away
+
+
+REGISTER = "/api/v1/auth/register"
+
+
+async def test_registrations_over_the_limit_are_refused(
+    client: AsyncClient, settings: Settings, session: AsyncSession
+) -> None:
+    settings.register_rate_limit = 2
+    for number in range(2):
+        response = await client.post(
+            REGISTER, json={"email": f"user{number}@example.com", "password": PASSWORD}
+        )
+        assert response.status_code == 201
+
+    assert_rate_limited(
+        await client.post(REGISTER, json={"email": "third@example.com", "password": PASSWORD})
+    )
+    assert await session.scalar(select(func.count()).select_from(User)) == 2
+
+
+async def test_failed_registrations_are_counted_too(
+    client: AsyncClient, registered: str, settings: Settings
+) -> None:
+    settings.register_rate_limit = 2  # one is used by the `registered` fixture
+    taken = await client.post(REGISTER, json={"email": EMAIL, "password": PASSWORD})
+    assert taken.status_code == 409
+
+    assert_rate_limited(
+        await client.post(REGISTER, json={"email": "new@example.com", "password": PASSWORD})
+    )
+
+
+async def test_registration_and_login_have_separate_counters(
+    client: AsyncClient, registered: str, settings: Settings
+) -> None:
+    settings.register_rate_limit = 1
+
+    assert (await login(client)).status_code == 200

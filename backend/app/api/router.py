@@ -2,10 +2,11 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, books, health, jobs
+from app.api import auth, books, health, jobs, library
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(books.router)
+api_router.include_router(library.router)
 api_router.include_router(jobs.router)
